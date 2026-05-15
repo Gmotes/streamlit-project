@@ -132,7 +132,7 @@ if page == "🏦 Churn Analysis":
         model = st.sidebar.selectbox("Choose Model", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"])
         # 2. Prepare the context
         # We convert the first few rows (or a summary) to a string so the LLM understands the structure
-        csv_sample = df.head(100).to_csv(index=False)
+        csv_sample = df.head(400).to_csv(index=False)
         column_names = ", ".join(df.columns)
 
         if prompt := st.chat_input("Ex: What is the average credit score of users who exited?"):
