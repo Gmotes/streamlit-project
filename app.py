@@ -1,12 +1,13 @@
 import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import streamlit as st
+from groq import Groq
+
+api_key = st.secrets["GROQ_API_KEY"]
+client = Groq(api_key=api_key)
 
 st.set_page_config(
     page_title="FinGuard AI",
@@ -120,6 +121,46 @@ if page == "🏦 Churn Analysis":
     k2.metric("Churned", f"{int(churned):,}", f"{churn_rate:.1f}%")
     k3.metric("Avg Balance", f"${avg_balance:,.0f}")
     k4.metric("Avg Credit Score", f"{avg_credit:.0f}")
+
+    st.divider()
+
+    st.markdown('<div class="section-title">Retention Action Engine </div>', unsafe_allow_html=True)
+
+    [c1] = st.columns(1)
+
+    with c1:
+        model = st.sidebar.selectbox("Choose Model", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"])
+        # 2. Prepare the context
+        # We convert the first few rows (or a summary) to a string so the LLM understands the structure
+        csv_sample = df.head(100).to_csv(index=False)
+        column_names = ", ".join(df.columns)
+
+        if prompt := st.chat_input("Ex: What is the average credit score of users who exited?"):
+            st.chat_message("user").markdown(prompt)
+
+            # Build the payload for Groq
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"""You are a data expert analyzing a Churn dataset. 
+                    The dataset contains these columns: {column_names}.
+                    Here is a sample of the data to understand the formatting:
+                    {csv_sample}
+
+                    Always provide insights based on this specific data structure."""
+                },
+                {"role": "user", "content": prompt}
+            ]
+
+            # Call Groq
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+            )
+
+            response = completion.choices[0].message.content
+            with st.chat_message("assistant"):
+                st.markdown(response)
 
     st.divider()
 
