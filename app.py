@@ -66,11 +66,6 @@ def load_assets():
         scaler = pickle.load(scaler_file)
     return model, scaler
 
-try:
-    model, scaler = load_assets()
-except FileNotFoundError:
-    st.error("Model or Scaler file not found. Please check your file paths.")
-
 
 def build_customer_input(credit_score, geography, gender, age, tenure, balance,
                          num_products, has_cr_card, is_active_member, estimated_salary):
@@ -519,7 +514,14 @@ elif page == "🤖 AI Analyst":
         "then Groq will explain the prediction and suggest retention actions."
     )
 
-    clf, feature_cols = load_assets()
+    clf, _scaler = load_assets()
+    feature_cols = [
+        "CreditScore", "Gender", "Age", "Tenure", "Balance", "NumOfProducts",
+        "HasCrCard", "IsActiveMember", "EstimatedSalary",
+        "Geography_Germany", "Geography_Spain",
+        "BalanceSalaryRatio", "ZeroBalance", "ProductsPerTenure",
+        "ActiveWithBalance", "CreditScorePerAge", "AgeGroup",
+    ]
 
     # ── Input form ────────────────────────────────────────────────────────────────
     with st.form("customer_form"):
