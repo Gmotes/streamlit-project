@@ -10,9 +10,16 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 from datetime import date
+from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
+from xgboost import XGBClassifier
+from lightgbm import LGBMClassifier
+from catboost import CatBoostClassifier
 from sklearn.neighbors import LocalOutlierFactor
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, RobustScaler
 
 pd.set_option('display.max_columns', None)
@@ -253,7 +260,7 @@ for col in outlier_cols:
 primary.drop(["RowNumber", "CustomerId", "Surname"], axis=1, inplace=True)
 
 ##################################
-# ENCODING
+# ENCODING-Primary
 ##################################
 
 # Değişkenlerin tiplerine göre ayrılması işlemi
@@ -267,7 +274,7 @@ primary = pd.get_dummies(primary,
                          drop_first=True)
 
 ##################################
-#FEATURE ENGINEERING
+#FEATURE ENGINEERING-Primary
 ##################################
 # Age Group
 primary["AgeGroup"] = pd.cut(primary["Age"],
@@ -345,7 +352,7 @@ primary = pd.get_dummies(primary,
 primary.head()
 primary.info()
 
-# Scale Etmek
+# Scaling
 from sklearn.preprocessing import RobustScaler
 
 scaler = RobustScaler()
@@ -361,3 +368,248 @@ scale_cols = [
 ]
 
 primary[scale_cols] = scaler.fit_transform(primary[scale_cols])
+
+##################################
+# MODELLEME-Primary
+##################################
+primary.head()
+#Train-Test Split
+y = primary["Exited"]
+X = primary.drop(["Exited"], axis=1)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.30,
+    random_state=17,
+    stratify=y
+)
+#stratify=y Train ve test setlerinde: Exited = 0 / 1 oranını korur. train’de %20 churn test’te %20 churn
+
+#MODEL COMPARISON
+#class_weight="balanced"
+models = [
+    ("LR", LogisticRegression(max_iter=1000, class_weight="balanced")),
+    ("RF", RandomForestClassifier(random_state=17, class_weight="balanced")),
+    ("XGBoost", XGBClassifier()),
+    ("LightGBM", LGBMClassifier()),
+    ("CatBoost", CatBoostClassifier(verbose=False))
+]
+
+from sklearn.model_selection import cross_validate
+scoring = ["accuracy", "precision", "recall", "f1", "roc_auc"]
+
+for name, model in models:
+
+    cv_results = cross_validate(
+        model,
+        X,
+        y,
+        cv=5,
+        scoring=scoring
+    )
+
+    print(f"########## {name} ##########")
+
+    print("Accuracy :", round(cv_results["test_accuracy"].mean(), 4))
+    print("Precision:", round(cv_results["test_precision"].mean(), 4))
+    print("Recall   :", round(cv_results["test_recall"].mean(), 4))
+    print("F1 Score :", round(cv_results["test_f1"].mean(), 4))
+    print("ROC_AUC  :", round(cv_results["test_roc_auc"].mean(), 4))
+
+    print("\n")
+
+#| Model    | Accuracy   | Recall     | F1         | ROC-AUC    |
+#| -------- | ---------- | ---------- | ---------- | ---------- |
+#| LR       | 0.7518     | **0.7177** | 0.5408     | 0.8146     |
+#| RF       | 0.8586     | 0.4394     | 0.5582     | 0.8478     |
+#| XGBoost  | 0.8553     | 0.4963     | 0.5827     | 0.8405     |
+#| LightGBM | 0.8595     | 0.4865     | 0.5850     | 0.8587     |
+#| CatBoost | **0.8642** | 0.4909     | **0.5955** | **0.8645** |
+# En Güçlü Genel Model:CatBoost en yüksek Accuracy en yüksek F1 en yüksek ROC-AUC
+# Logistic Regression Recall’da çok güçlü Recall = 0.7177 churn olacak müşterilerin %71’ini yakalıyor.
+# CatBoost achieved the best overall classification performance, while Logistic Regression provided the highest recall for churn detection.
+
+#Final Model
+from imblearn.over_sampling import SMOTE
+from catboost import CatBoostClassifier
+
+# SMOTE
+smote = SMOTE(random_state=17)
+
+X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+
+# FINAL MODEL
+final_model = CatBoostClassifier(
+    verbose=False,
+    random_state=17
+)
+
+# TRAIN
+final_model.fit(X_resampled, y_resampled)
+
+# PREDICT
+y_pred = final_model.predict(X_test)
+
+y_prob = final_model.predict_proba(X_test)[:, 1]
+
+# METRICS
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score
+)
+
+print("Accuracy :", accuracy_score(y_test, y_pred))
+print("Precision:", precision_score(y_test, y_pred))
+print("Recall   :", recall_score(y_test, y_pred))
+print("F1 Score :", f1_score(y_test, y_pred))
+print("ROC_AUC  :", roc_auc_score(y_test, y_prob))
+
+# Accuracy : 0.855
+# Precision: 0.6746031746031746
+# Recall   : 0.5564648117839607
+# F1 Score : 0.6098654708520179
+# ROC_AUC  : 0.8581304519692343
+
+# Threshold Tuning
+from sklearn.metrics import f1_score
+import numpy as np
+
+thresholds = np.arange(0.1, 0.9, 0.01)
+
+best_threshold = 0
+best_f1 = 0
+
+for threshold in thresholds:
+
+    y_pred_threshold = (y_prob >= threshold).astype(int)
+
+    score = f1_score(y_test, y_pred_threshold)
+
+    if score > best_f1:
+        best_f1 = score
+        best_threshold = threshold
+
+print("Best Threshold:", best_threshold)
+print("Best F1:", best_f1)
+
+# Best Threshold: 0.3699999999999999
+# Best F1: 0.6252945797329144
+
+best_threshold = 0.37
+
+y_pred_final = (y_prob >= best_threshold).astype(int)
+
+print("Accuracy :", accuracy_score(y_test, y_pred_final))
+print("Precision:", precision_score(y_test, y_pred_final))
+print("Recall   :", recall_score(y_test, y_pred_final))
+print("F1 Score :", f1_score(y_test, y_pred_final))
+print("ROC_AUC  :", roc_auc_score(y_test, y_prob))
+
+# Accuracy : 0.841
+# Precision: 0.6012084592145015
+# Recall   : 0.6513911620294599
+# F1 Score : 0.6252945797329144
+# ROC_AUC  : 0.8581304519692343
+
+# Feature Importance
+feature_importance = pd.DataFrame({
+    "Feature": X.columns,
+    "Importance": final_model.feature_importances_
+}).sort_values("Importance", ascending=False)
+
+feature_importance.head(15)
+
+#                         Feature  Importance
+# 2                           Age      23.561
+# 5                 NumOfProducts       8.395
+# 13          CustomerHealthScore       8.184
+# 12         ProductActivityScore       7.218
+# 4                       Balance       6.061
+# 0                   CreditScore       5.215
+# 8               EstimatedSalary       4.585
+# 9             Geography_Germany       3.883
+# 7                IsActiveMember       3.662
+# 11           BalanceSalaryRatio       3.405
+# 19               AgeGroup_46-60       3.279
+# 23      CreditScoreSegment_Fair       3.038
+# 3                        Tenure       2.988
+# 24      CreditScoreSegment_Good       2.526
+# 25  CreditScoreSegment_VeryGood       2.051
+
+
+# SHAP
+
+import shap
+
+explainer = shap.TreeExplainer(final_model)
+shap_values = explainer.shap_values(X_test)
+
+shap.summary_plot(shap_values, X_test)
+
+#Hyperparameter tuning
+
+from sklearn.model_selection import GridSearchCV
+from catboost import CatBoostClassifier
+
+params = {
+    "depth": [4, 6, 8],
+    "learning_rate": [0.03, 0.05, 0.1],
+    "iterations": [300, 500],
+    "l2_leaf_reg": [3, 5, 7]
+}
+
+grid = GridSearchCV(
+    CatBoostClassifier(verbose=False, random_state=17),
+    params,
+    cv=3,
+    scoring="f1",
+    n_jobs=-1
+)
+
+grid.fit(X_resampled, y_resampled)
+
+print(grid.best_params_)
+print(grid.best_score_)
+
+# GridSearchCV(cv=3, estimator=CatBoostClassifier(random_state=17, verbose=False),
+#              n_jobs=-1,
+#              param_grid={'depth': [4, 6, 8], 'iterations': [300, 500],
+#                          'l2_leaf_reg': [3, 5, 7],
+#                          'learning_rate': [0.03, 0.05, 0.1]},
+#              scoring='f1')
+# print(grid.best_params_)
+# print(grid.best_score_)
+# {'depth': 8, 'iterations': 500, 'l2_leaf_reg': 5, 'learning_rate': 0.03}
+# 0.8664306322620993
+
+final_model = CatBoostClassifier(
+    depth=8,
+    iterations=500,
+    l2_leaf_reg=5,
+    learning_rate=0.03,
+    verbose=False,
+    random_state=17
+)
+
+final_model.fit(X_resampled, y_resampled)
+
+y_prob = final_model.predict_proba(X_test)[:, 1]
+
+best_threshold = 0.37
+y_pred_final = (y_prob >= best_threshold).astype(int)
+
+print("Accuracy :", accuracy_score(y_test, y_pred_final))
+print("Precision:", precision_score(y_test, y_pred_final))
+print("Recall   :", recall_score(y_test, y_pred_final))
+print("F1 Score :", f1_score(y_test, y_pred_final))
+print("ROC_AUC  :", roc_auc_score(y_test, y_prob))
+
+# Accuracy : 0.8346666666666667
+# Precision: 0.5820256776034237
+# Recall   : 0.6677577741407529
+# F1 Score : 0.6219512195121951
+# ROC_AUC  : 0.8567013706438197

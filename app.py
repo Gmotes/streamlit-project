@@ -5,8 +5,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from groq import Groq
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import LabelEncoder
+import pickle
 
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
@@ -59,23 +58,18 @@ def load_paysim(n=PAYSIM_SAMPLE):
     return df
 
 
-@st.cache_resource
-def train_churn_classifier():
-    df = pd.read_csv(CHURN_PATH)
-    df.drop(columns=["RowNumber", "CustomerId", "Surname"], inplace=True)
-    df["Gender"] = (df["Gender"] == "Male").astype(int)
-    df = pd.get_dummies(df, columns=["Geography"], drop_first=True)
-    df["BalanceSalaryRatio"] = df["Balance"] / (df["EstimatedSalary"] + 1)
-    df["ZeroBalance"] = (df["Balance"] == 0).astype(int)
-    df["ProductsPerTenure"] = df["NumOfProducts"] / (df["Tenure"] + 1)
-    df["ActiveWithBalance"] = df["IsActiveMember"] * (df["Balance"] > 0).astype(int)
-    df["CreditScorePerAge"] = df["CreditScore"] / df["Age"]
-    df["AgeGroup"] = pd.cut(df["Age"], bins=[0, 35, 55, 100], labels=[0, 1, 2]).astype(int)
-    X = df.drop(columns=["Exited"])
-    y = df["Exited"]
-    clf = RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
-    clf.fit(X, y)
-    return clf, list(X.columns)
+@st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
+def load_assets():
+    with open('machine_learning_model.pkl', 'rb') as model_file:
+        model = pickle.load(model_file)
+    with open('scaler.pkl', 'rb') as scaler_file:
+        scaler = pickle.load(scaler_file)
+    return model, scaler
+
+try:
+    model, scaler = load_assets()
+except FileNotFoundError:
+    st.error("Model or Scaler file not found. Please check your file paths.")
 
 
 def build_customer_input(credit_score, geography, gender, age, tenure, balance,
@@ -525,7 +519,7 @@ elif page == "🤖 AI Analyst":
         "then Groq will explain the prediction and suggest retention actions."
     )
 
-    clf, feature_cols = train_churn_classifier()
+    clf, feature_cols = load_assets()
 
     # ── Input form ────────────────────────────────────────────────────────────────
     with st.form("customer_form"):
