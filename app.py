@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from groq import Groq
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
 
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
@@ -57,6 +59,48 @@ def load_paysim(n=PAYSIM_SAMPLE):
     return df
 
 
+@st.cache_resource
+def train_churn_classifier():
+    df = pd.read_csv(CHURN_PATH)
+    df.drop(columns=["RowNumber", "CustomerId", "Surname"], inplace=True)
+    df["Gender"] = (df["Gender"] == "Male").astype(int)
+    df = pd.get_dummies(df, columns=["Geography"], drop_first=True)
+    df["BalanceSalaryRatio"] = df["Balance"] / (df["EstimatedSalary"] + 1)
+    df["ZeroBalance"] = (df["Balance"] == 0).astype(int)
+    df["ProductsPerTenure"] = df["NumOfProducts"] / (df["Tenure"] + 1)
+    df["ActiveWithBalance"] = df["IsActiveMember"] * (df["Balance"] > 0).astype(int)
+    df["CreditScorePerAge"] = df["CreditScore"] / df["Age"]
+    df["AgeGroup"] = pd.cut(df["Age"], bins=[0, 35, 55, 100], labels=[0, 1, 2]).astype(int)
+    X = df.drop(columns=["Exited"])
+    y = df["Exited"]
+    clf = RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
+    clf.fit(X, y)
+    return clf, list(X.columns)
+
+
+def build_customer_input(credit_score, geography, gender, age, tenure, balance,
+                         num_products, has_cr_card, is_active_member, estimated_salary):
+    return pd.DataFrame([{
+        "CreditScore": credit_score,
+        "Gender": 1 if gender == "Male" else 0,
+        "Age": age,
+        "Tenure": tenure,
+        "Balance": balance,
+        "NumOfProducts": num_products,
+        "HasCrCard": int(has_cr_card),
+        "IsActiveMember": int(is_active_member),
+        "EstimatedSalary": estimated_salary,
+        "Geography_Germany": 1 if geography == "Germany" else 0,
+        "Geography_Spain": 1 if geography == "Spain" else 0,
+        "BalanceSalaryRatio": balance / (estimated_salary + 1),
+        "ZeroBalance": int(balance == 0),
+        "ProductsPerTenure": num_products / (tenure + 1),
+        "ActiveWithBalance": int(is_active_member) * int(balance > 0),
+        "CreditScorePerAge": credit_score / age,
+        "AgeGroup": 0 if age < 35 else (1 if age <= 55 else 2),
+    }])
+
+
 # ─── Sidebar ─────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.image(
@@ -69,7 +113,7 @@ with st.sidebar:
 
     page = st.radio(
         "Navigate",
-        ["🏦 Churn Analysis", "🚨 Fraud Detection"],
+        ["🏦 Churn Analysis", "🚨 Fraud Detection", "🤖 AI Analyst"],
         label_visibility="collapsed",
     )
 
@@ -303,7 +347,7 @@ if page == "🏦 Churn Analysis":
 # ═══════════════════════════════════════════════════════════════════════════════════
 # PAGE 2 – FRAUD DETECTION
 # ═══════════════════════════════════════════════════════════════════════════════════
-else:
+elif page == "🚨 Fraud Detection":
     st.title("🚨 Fraud Detection Analysis")
     st.markdown(
         f"Exploring transaction fraud patterns. Showing first **{PAYSIM_SAMPLE:,}** rows of PaySim dataset."
@@ -469,3 +513,125 @@ else:
     # ── Raw data toggle ────────────────────────────────────────────────────────────
     with st.expander("View raw data"):
         st.dataframe(filtered.head(500).reset_index(drop=True), use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# PAGE 3 – AI ANALYST
+# ═══════════════════════════════════════════════════════════════════════════════════
+elif page == "🤖 AI Analyst":
+    st.title("🤖 AI Churn Analyst")
+    st.markdown(
+        "Enter a customer's profile. The churn model will score them, "
+        "then Groq will explain the prediction and suggest retention actions."
+    )
+
+    clf, feature_cols = train_churn_classifier()
+
+    # ── Input form ────────────────────────────────────────────────────────────────
+    with st.form("customer_form"):
+        st.markdown('<div class="section-title">Customer Profile</div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+
+        with c1:
+            credit_score = st.number_input("Credit Score", min_value=300, max_value=900, value=650)
+            age = st.number_input("Age", min_value=18, max_value=100, value=40)
+            tenure = st.slider("Tenure (years)", 0, 10, 5)
+            balance = st.number_input("Balance ($)", min_value=0.0, max_value=500_000.0, value=50_000.0, step=1000.0)
+
+        with c2:
+            geography = st.selectbox("Geography", ["France", "Germany", "Spain"])
+            gender = st.selectbox("Gender", ["Male", "Female"])
+            num_products = st.selectbox("Number of Products", [1, 2, 3, 4])
+            estimated_salary = st.number_input("Estimated Salary ($)", min_value=0.0, max_value=300_000.0, value=60_000.0, step=1000.0)
+
+        with c3:
+            has_cr_card = st.checkbox("Has Credit Card", value=True)
+            is_active_member = st.checkbox("Is Active Member", value=True)
+            groq_model = st.selectbox("Groq Model", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"])
+
+        submitted = st.form_submit_button("🔍 Predict & Analyse", use_container_width=True)
+
+    if submitted:
+        input_df = build_customer_input(
+            credit_score, geography, gender, age, tenure, balance,
+            num_products, has_cr_card, is_active_member, estimated_salary,
+        )
+        input_df = input_df[feature_cols]
+
+        churn_prob = clf.predict_proba(input_df)[0][1]
+        churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
+
+        # ── Prediction metrics ────────────────────────────────────────────────────
+        st.divider()
+        st.markdown('<div class="section-title">Prediction Result</div>', unsafe_allow_html=True)
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Churn Probability", f"{churn_prob:.1%}")
+        r2.metric("Risk Level", churn_label)
+        r3.metric("Retention Probability", f"{1 - churn_prob:.1%}")
+
+        # ── Top feature importances ───────────────────────────────────────────────
+        importances = pd.Series(clf.feature_importances_, index=feature_cols)
+        top5 = importances.nlargest(5)
+        top5_str = "\n".join(
+            f"  - {feat} (importance {imp:.3f}, customer value: {input_df[feat].values[0]:.3f})"
+            for feat, imp in top5.items()
+        )
+
+        fig_imp = px.bar(
+            top5.reset_index().rename(columns={"index": "Feature", 0: "Importance"}),
+            x="Importance",
+            y="Feature",
+            orientation="h",
+            title="Top 5 Model Features",
+            color="Importance",
+            color_continuous_scale="Blues",
+        )
+        fig_imp.update_layout(coloraxis_showscale=False, yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig_imp, use_container_width=True)
+
+        # ── Groq explanation ──────────────────────────────────────────────────────
+        st.divider()
+        st.markdown('<div class="section-title">AI Analysis</div>', unsafe_allow_html=True)
+
+        customer_profile = (
+            f"- Credit Score: {credit_score}\n"
+            f"- Geography: {geography}\n"
+            f"- Gender: {gender}\n"
+            f"- Age: {age}\n"
+            f"- Tenure: {tenure} years\n"
+            f"- Balance: ${balance:,.0f}\n"
+            f"- Number of Products: {num_products}\n"
+            f"- Has Credit Card: {'Yes' if has_cr_card else 'No'}\n"
+            f"- Is Active Member: {'Yes' if is_active_member else 'No'}\n"
+            f"- Estimated Salary: ${estimated_salary:,.0f}"
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior banking analytics expert. "
+                    "A Random Forest model has just predicted a customer's churn probability. "
+                    "Explain the prediction in plain language and provide 3–5 specific, "
+                    "actionable retention strategies tailored to this customer's profile. "
+                    "Be concise and professional. Use bullet points where appropriate."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Customer profile:\n{customer_profile}\n\n"
+                    f"Model prediction: {churn_prob:.1%} churn probability ({churn_label})\n\n"
+                    f"Top 5 most important features (globally) with this customer's values:\n{top5_str}\n\n"
+                    "Please:\n"
+                    "1. In 2–3 sentences, explain why this customer may or may not be at risk, "
+                    "referencing their specific profile.\n"
+                    "2. List 3–5 concrete retention actions the bank should take for this customer."
+                ),
+            },
+        ]
+
+        with st.spinner("Asking Groq…"):
+            completion = client.chat.completions.create(model=groq_model, messages=messages)
+
+        st.markdown(completion.choices[0].message.content)
