@@ -106,11 +106,9 @@ def process_analytical_engine(churn_df, paysim_df):
 
 @st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
 def load_assets():
-    with open('machine_learning_model.pkl', 'rb') as model_file:
+    with open('xgb_churn_model.pkl', 'rb') as model_file:
         model = pickle.load(model_file)
-    with open('scaler.pkl', 'rb') as scaler_file:
-        scaler = pickle.load(scaler_file)
-    return model, scaler
+    return model
 
 
 # Initialization sequence execution
@@ -232,7 +230,7 @@ def show_AI_analyst_page():
         "then Groq will explain the prediction and suggest retention actions."
     )
 
-    clf, _scaler = load_assets()
+    clf = load_assets()
     feature_cols = [
         "CreditScore", "Gender", "Age", "Tenure", "Balance", "NumOfProducts",
         "HasCrCard", "IsActiveMember", "EstimatedSalary",
