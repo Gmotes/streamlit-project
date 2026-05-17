@@ -244,7 +244,7 @@ def show_AI_analyst_page():
         with c2:
             geography = st.selectbox("Geography", ["France", "Germany", "Spain"])
             gender = st.selectbox("Gender", ["Male", "Female"])
-            num_products = st.selectbox("Number of Products", [1, 2, 3, 4])
+            num_products = st.selectbox("NumOfProducts", [1, 2, 3, 4])
             estimated_salary = st.number_input("Estimated Salary ($)", min_value=0.0, max_value=300_000.0,
                                                value=60_000.0, step=1000.0)
 
@@ -258,7 +258,7 @@ def show_AI_analyst_page():
     if submitted:
         input_df = build_customer_input(
             credit_score, geography, gender, age, tenure, balance,
-            num_products, has_cr_card, is_active_member, estimated_salary,
+            num_products, has_cr_card, is_active_member, estimated_salary
         )
         input_df = input_df[feature_cols]
         input_df.loc[(input_df["Age"] > 75), "Age"] = 75
