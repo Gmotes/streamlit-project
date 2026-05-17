@@ -40,6 +40,7 @@ def load_paysim_data():
         f"""
             SELECT type, isFraud, amount
             FROM read_parquet('{url}')
+            LIMIT 1000000
         """
     ).df()
 
