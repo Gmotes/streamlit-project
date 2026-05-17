@@ -2,6 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+import pickle
+import plotly.express as px
+from groq import Groq
+
+
+api_key = st.secrets["GROQ_API_KEY"]
+client = Groq(api_key=api_key)
+
 
 # Set page configuration
 st.set_page_config(
@@ -96,6 +104,14 @@ def process_analytical_engine(churn_df, paysim_df):
 
     return df_scored, importance_df, df_fraud
 
+@st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
+def load_assets():
+    with open('machine_learning_model.pkl', 'rb') as model_file:
+        model = pickle.load(model_file)
+    with open('scaler.pkl', 'rb') as scaler_file:
+        scaler = pickle.load(scaler_file)
+    return model, scaler
+
 
 # Initialization sequence execution
 try:
@@ -105,6 +121,31 @@ try:
 except Exception as e:
     st.error(f"Error loading datasets. Place 'Churn_Modelling.csv' and 'PaySim.csv' in the same folder. Details: {e}")
     st.stop()
+
+
+
+
+def build_customer_input(credit_score, geography, gender, age, tenure, balance,
+                         num_products, has_cr_card, is_active_member, estimated_salary):
+    return pd.DataFrame([{
+        "CreditScore": credit_score,
+        "Gender": 1 if gender == "Male" else 0,
+        "Age": age,
+        "Tenure": tenure,
+        "Balance": balance,
+        "NumOfProducts": num_products,
+        "HasCrCard": int(has_cr_card),
+        "IsActiveMember": int(is_active_member),
+        "EstimatedSalary": estimated_salary,
+        "Geography_Germany": 1 if geography == "Germany" else 0,
+        "Geography_Spain": 1 if geography == "Spain" else 0,
+        "BalanceSalaryRatio": balance / (estimated_salary + 1),
+        "ZeroBalance": int(balance == 0),
+        "ProductsPerTenure": num_products / (tenure + 1),
+        "ActiveWithBalance": int(is_active_member) * int(balance > 0),
+        "CreditScorePerAge": credit_score / age,
+        "AgeGroup": 0 if age < 35 else (1 if age <= 55 else 2),
+    }])
 
 
 # -----------------------------------------------------------------------------
@@ -184,124 +225,131 @@ def show_lifecycle_health_page():
     st.info("Review specific regional suggestions by navigating inside the core options matrices of Page 4.")
 
 
-def show_action_recommendation_page():
-    st.title("🎯 Page 5: Action Recommendation Dashboard")
+def show_AI_analyst_page():
+    st.title("🤖 AI Churn Analyst")
     st.markdown(
-        "Select a specific account profile from cache to look up their current risk indexes and review targeted system operations suggestions.")
+        "Enter a customer's profile. The churn model will score them, "
+        "then Groq will explain the prediction and suggest retention actions."
+    )
 
-    # -------------------------------------------------------------------------
-    # STEP 1: SELECT CUSTOMER
-    # -------------------------------------------------------------------------
-    st.header("1. Select Customer Target Profile")
+    clf, _scaler = load_assets()
+    feature_cols = [
+        "CreditScore", "Gender", "Age", "Tenure", "Balance", "NumOfProducts",
+        "HasCrCard", "IsActiveMember", "EstimatedSalary",
+        "Geography_Germany", "Geography_Spain",
+        "BalanceSalaryRatio", "ZeroBalance", "ProductsPerTenure",
+        "ActiveWithBalance", "CreditScorePerAge", "AgeGroup",
+    ]
 
-    # Setup interactive filter controls to quickly isolate specific user types
-    filter_col1, filter_col2 = st.columns(2)
-    with filter_col1:
-        tier_filter = st.selectbox("Quick-Filter by Risk Status Group:",
-                                   ["All Customers", "High Churn Risk Profiles", "High Fraud Risk Profiles"])
+    # ── Input form ────────────────────────────────────────────────────────────────
+    with st.form("customer_form"):
+        st.markdown('<div class="section-title">Customer Profile</div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
 
-    # Filter dropdown database base population depending on chosen parameters
-    if tier_filter == "High Churn Risk Profiles":
-        subset_df = churn_df[churn_df['Risk_Tier'] == 'High Risk']
-    elif tier_filter == "High Fraud Risk Profiles":
-        subset_df = churn_df[churn_df['Fraud_Score'] > 50.0]
-    else:
-        subset_df = churn_df
+        with c1:
+            credit_score = st.number_input("Credit Score", min_value=300, max_value=900, value=650)
+            age = st.number_input("Age", min_value=18, max_value=100, value=40)
+            tenure = st.slider("Tenure (years)", 0, 10, 5)
+            balance = st.number_input("Balance ($)", min_value=0.0, max_value=500_000.0, value=50_000.0, step=1000.0)
 
-    # Search lookup tool via an interactive selectbox component
-    customer_options = subset_df.apply(lambda row: f"{row['CustomerId']} - {row['Surname']} ({row['Geography']})",
-                                       axis=1).tolist()
+        with c2:
+            geography = st.selectbox("Geography", ["France", "Germany", "Spain"])
+            gender = st.selectbox("Gender", ["Male", "Female"])
+            num_products = st.selectbox("Number of Products", [1, 2, 3, 4])
+            estimated_salary = st.number_input("Estimated Salary ($)", min_value=0.0, max_value=300_000.0,
+                                               value=60_000.0, step=1000.0)
 
-    if not customer_options:
-        st.warning("No records found matching the specified group filter.")
-        return
+        with c3:
+            has_cr_card = st.checkbox("Has Credit Card", value=True)
+            is_active_member = st.checkbox("Is Active Member", value=True)
+            groq_model = st.selectbox("Groq Model", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"])
 
-    selected_option = st.selectbox("Choose Customer Account Record to Audit:", options=customer_options)
-    selected_id = int(selected_option.split(" - ")[0])
+        submitted = st.form_submit_button("🔍 Predict & Analyse", use_container_width=True)
 
-    # Isolate exact dataset row slice
-    user_record = churn_df[churn_df['CustomerId'] == selected_id].iloc[0]
+    if submitted:
+        input_df = build_customer_input(
+            credit_score, geography, gender, age, tenure, balance,
+            num_products, has_cr_card, is_active_member, estimated_salary,
+        )
+        input_df = input_df[feature_cols]
 
-    st.divider()
+        churn_prob = clf.predict_proba(input_df)[0][1]
+        churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
 
-    # -------------------------------------------------------------------------
-    # STEP 2 & 3: SHOW CHURN SCORE & FRAUD SCORE
-    # -------------------------------------------------------------------------
-    st.header("2. Risk Vectors Evaluation Matrix")
+        # ── Prediction metrics ────────────────────────────────────────────────────
+        st.divider()
+        st.markdown('<div class="section-title">Prediction Result</div>', unsafe_allow_html=True)
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Churn Probability", f"{churn_prob:.1%}")
+        r2.metric("Risk Level", churn_label)
+        r3.metric("Retention Probability", f"{1 - churn_prob:.1%}")
 
-    c_score = float(user_record['Churn_Score'])
-    f_score = float(user_record['Fraud_Score'])
+        # ── Top feature importances ───────────────────────────────────────────────
+        importances = pd.Series(clf.feature_importances_, index=feature_cols)
+        top5 = importances.nlargest(5)
+        top5_str = "\n".join(
+            f"  - {feat} (importance {imp:.3f}, customer value: {input_df[feat].values[0]:.3f})"
+            for feat, imp in top5.items()
+        )
 
-    score_col1, score_col2 = st.columns(2)
+        fig_imp = px.bar(
+            top5.reset_index().rename(columns={"index": "Feature", 0: "Importance"}),
+            x="Importance",
+            y="Feature",
+            orientation="h",
+            title="Top 5 Model Features",
+            color="Importance",
+            color_continuous_scale="Blues",
+        )
+        fig_imp.update_layout(coloraxis_showscale=False, yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig_imp, use_container_width=True)
 
-    with score_col1:
-        # Style color alerts depending on risk level severity thresholds
-        if c_score >= 70.0:
-            st.error(f"### 📉 Churn Score: **{c_score}%** (Critical Risk)")
-        elif c_score >= 30.0:
-            st.warning(f"### 📉 Churn Score: **{c_score}%** (Moderate Risk)")
-        else:
-            st.success(f"### 📉 Churn Score: **{c_score}%** (Stable Account)")
+        # ── Groq explanation ──────────────────────────────────────────────────────
+        st.divider()
+        st.markdown('<div class="section-title">AI Analysis</div>', unsafe_allow_html=True)
 
-    with score_col2:
-        if f_score >= 50.0:
-            st.error(f"### 🔒 Fraud Score: **{f_score}%** (High Alert Level)")
-        elif f_score >= 20.0:
-            st.warning(f"### 🔒 Fraud Score: **{f_score}%** (Review Required)")
-        else:
-            st.success(f"### 🔒 Fraud Score: **{f_score}%** (Low Activity Threat)")
+        customer_profile = (
+            f"- Credit Score: {credit_score}\n"
+            f"- Geography: {geography}\n"
+            f"- Gender: {gender}\n"
+            f"- Age: {age}\n"
+            f"- Tenure: {tenure} years\n"
+            f"- Balance: ${balance:,.0f}\n"
+            f"- Number of Products: {num_products}\n"
+            f"- Has Credit Card: {'Yes' if has_cr_card else 'No'}\n"
+            f"- Is Active Member: {'Yes' if is_active_member else 'No'}\n"
+            f"- Estimated Salary: ${estimated_salary:,.0f}"
+        )
 
-    # Display structural metrics table
-    st.markdown("**Profile Attributes Summary Table:**")
-    st.dataframe(
-        pd.DataFrame([user_record[['Age', 'CreditScore', 'Balance', 'NumOfProducts', 'IsActiveMember', 'HasCrCard']]]),
-        use_container_width=True, hide_index=True)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior banking analytics expert. "
+                    "A Random Forest model has just predicted a customer's churn probability. "
+                    "Explain the prediction in plain language and provide 3–5 specific, "
+                    "actionable retention strategies tailored to this customer's profile. "
+                    "Be concise and professional. Use bullet points where appropriate."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Customer profile:\n{customer_profile}\n\n"
+                    f"Model prediction: {churn_prob:.1%} churn probability ({churn_label})\n\n"
+                    f"Top 5 most important features (globally) with this customer's values:\n{top5_str}\n\n"
+                    "Please:\n"
+                    "1. In 2–3 sentences, explain why this customer may or may not be at risk, "
+                    "referencing their specific profile.\n"
+                    "2. List 3–5 concrete retention actions the bank should take for this customer."
+                ),
+            },
+        ]
 
-    st.divider()
+        with st.spinner("Asking Groq…"):
+            completion = client.chat.completions.create(model=groq_model, messages=messages)
 
-    # -------------------------------------------------------------------------
-    # STEP 4: SEE SUGGESTIONS
-    # -------------------------------------------------------------------------
-    st.header("3. Prescriptive System Action Recommendations")
-
-    # Expandable interface section
-    with st.expander("👉 Click to Open Action Matrix Suggestions Playbook", expanded=True):
-        st.subheader(f"Strategic Directives Ledger for {user_record['Surname']} (ID: {selected_id})")
-
-        # Build logical decision rules engine combining both analytical scores
-        suggestions_triggered = 0
-
-        if c_score >= 70.0:
-            st.markdown("🔴 **CRITICAL CHURN RETENTION ACTION MANDATE**")
-            st.markdown(f"""
-            - **Observation:** Churn risk profile is at **{c_score}%** with an account balance of **${user_record['Balance']:,.2f}**.
-            - **Immediate Interventions:**
-                1. **High-Value Account Outreach:** Initiate direct phone contact from a senior customer success manager within 24 hours.
-                2. **Product Consolidation Offer:** This customer has **{user_record['NumOfProducts']}** product(s). If they hold 3 or more, offer a waiver to consolidate accounts without penalty fees.
-                3. **Active Service Incentive:** Since active membership status is **{user_record['IsActiveMember']}**, provide a customized bonus cash back structure on transactional fees if they complete 5 app logins this month.
-            """)
-            suggestions_triggered += 1
-
-        if f_score >= 50.0:
-            st.markdown("⚠️ **SECURITY & FRAUD RISK ENFORCEMENT DIRECTIVE**")
-            st.markdown(f"""
-            - **Observation:** Calculated internal account velocity/fraud score has peaked at **{f_score}%**.
-            - **Immediate Interventions:**
-                1. **Enhanced Step-Up Authentication (MFA):** Enforce immediate mandatory multi-factor validation checks on all outbound transactions exceeding $1,000.
-                2. **Velocity Parameter Caps:** Apply a temporary 48-hour transactional transfer ceiling equal to 25% of their active balance vector.
-                3. **Audit Origin Logs:** Request an immediate technical match verification on recent balance adjustments against matching `PaySim` transfer records.
-            """)
-            suggestions_triggered += 1
-
-        if suggestions_triggered == 0:
-            st.markdown("🟢 **STANDARD MAINTENANCE & LIFECYCLE NURTURE PROTOCOL**")
-            st.markdown(f"""
-            - **Observation:** Both risk thresholds are within standard system tolerances (Churn: {c_score}%, Fraud: {f_score}%).
-            - **Immediate Interventions:**
-                1. **Cross-Sell Premium Upgrades:** The customer holds a credit score of **{user_record['CreditScore']}**. If it's above 700, cross-promote premium credit tier offerings.
-                2. **Loyalty Program Enrollment:** Automatically add this account to premium benefit reward cycles to maintain retention scores.
-            """)
-
+        st.markdown(completion.choices[0].message.content)
 
 # -----------------------------------------------------------------------------
 # 3. SIDEBAR NAVIGATION CONTROLLER
@@ -332,5 +380,5 @@ elif page_selection == "3. Transaction Fraud Analysis":
     show_fraud_insights_page()
 elif page_selection == "4. Lifecycle & Health Optimization":
     show_lifecycle_health_page()
-elif page_selection == "5. Action Recommendation":
-    show_action_recommendation_page()
+elif page_selection == "5. AI Analysis":
+    show_AI_analyst_page()
