@@ -52,6 +52,15 @@ def process_churn_analytics(df):
 
     df_scored['Risk_Tier'] = df_scored['Churn_Probability'].apply(get_risk_tier)
 
+    # --- PAGE 4 HEALTH & ENGAGEMENT METRICS CALCULATION ---
+    # Engagement Score (0-100): Based on active membership, owning a credit card, and optimal product count
+    product_factor = np.where(df_scored['NumOfProducts'] == 2, 40, np.where(df_scored['NumOfProducts'] == 1, 25, 10))
+    df_scored['Engagement_Score'] = (df_scored['IsActiveMember'] * 40) + (df_scored['HasCrCard'] * 20) + product_factor
+
+    # Health Score (0-100): Inverse of Churn Probability mapped positively, boosted by active participation
+    df_scored['Health_Score'] = (
+                (1.0 - df_scored['Churn_Probability']) * 80 + (df_scored['IsActiveMember'] * 20)).round(2)
+
     importance_df = pd.DataFrame({
         'Feature': features,
         'Importance': rf.feature_importances_
@@ -64,14 +73,12 @@ def process_churn_analytics(df):
 def process_fraud_segmentation(df):
     """Processes fraud segments based on transaction sizes."""
     df_fraud = df.copy()
-
-    # Calculate quantiles for fraud transactions to form risk segment thresholds dynamically
     fraud_amounts = df_fraud[df_fraud['isFraud'] == 1]['amount']
     if not fraud_amounts.empty:
         q1 = fraud_amounts.quantile(0.33)
         q2 = fraud_amounts.quantile(0.66)
     else:
-        q1, q2 = 10000, 100000  # Fallbacks
+        q1, q2 = 10000, 100000
 
     def segment_amount_risk(amt):
         if amt <= q1:
@@ -124,7 +131,6 @@ def show_overview_page():
                   delta_color="inverse")
 
     st.divider()
-    st.subheader("📋 Dataset Previews (Loaded from Cache)")
     tab1, tab2 = st.tabs(["Churn Dataset Preview", "PaySim Transaction Dataset Preview"])
     with tab1:
         st.dataframe(churn_df.head(10), use_container_width=True)
@@ -183,107 +189,138 @@ def show_churn_analysis_page():
 def show_fraud_insights_page():
     st.title("🔒 Page 3: Transaction Fraud Analysis")
     st.markdown(
-        "This updated module tracks financial transactional vectors from cache to systematically isolate fraudulent activity trends.")
+        "This module tracks financial transactional vectors from cache to systematically isolate fraudulent activity trends.")
 
-    # -------------------------------------------------------------------------
-    # PARAMETER 1: Fraud Rate
-    # -------------------------------------------------------------------------
     st.header("1. Global System Fraud Rate")
-
     total_tx = len(paysim_df)
     fraud_tx_count = int(paysim_df['isFraud'].sum())
     global_fraud_rate = (fraud_tx_count / total_tx) * 100
     total_fraud_volume = paysim_df[paysim_df['isFraud'] == 1]['amount'].sum()
 
     f_col1, f_col2, f_col3 = st.columns(3)
-    with f_col1:
-        st.metric(label="Total Logged Transactions", value=f"{total_tx:,}")
-    with f_col2:
-        st.metric(label="Identified Fraud Incident Records", value=f"{fraud_tx_count:,}",
-                  delta=f"{global_fraud_rate:.3f}% Fraud Rate", delta_color="inverse")
-    with f_col3:
-        st.metric(label="Total Capital Impact At Risk", value=f"${total_fraud_volume:,.2f}")
+    with f_col1: st.metric(label="Total Logged Transactions", value=f"{total_tx:,}")
+    with f_col2: st.metric(label="Identified Fraud Incident Records", value=f"{fraud_tx_count:,}",
+                           delta=f"{global_fraud_rate:.3f}% Fraud Rate", delta_color="inverse")
+    with f_col3: st.metric(label="Total Capital Impact At Risk", value=f"${total_fraud_volume:,.2f}")
 
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 2: Fraud by Transaction Type
-    # -------------------------------------------------------------------------
     st.header("2. Fraud Incidence by Transaction Type")
-
-    # Calculate incidence count and mean rate per category type
     type_metrics = paysim_df.groupby('type').agg(
-        Total_Transactions=('isFraud', 'count'),
-        Fraud_Incidents=('isFraud', 'sum'),
+        Total_Transactions=('isFraud', 'count'), Fraud_Incidents=('isFraud', 'sum'),
         Fraud_Rate_Percentage=('isFraud', lambda x: (x.mean() * 100).round(4))
     ).sort_values(by='Fraud_Incidents', ascending=False)
 
     t_col1, t_col2 = st.columns([1, 1])
-    with t_col1:
-        st.markdown("**Transaction Type Matrix Table**")
-        st.dataframe(type_metrics, use_container_width=True)
-    with t_col2:
-        st.markdown("**Fraud Count Distribution by Type**")
-        st.bar_chart(type_metrics, y='Fraud_Incidents', color="#FF9F1C")
+    with t_col1: st.dataframe(type_metrics, use_container_width=True)
+    with t_col2: st.bar_chart(type_metrics, y='Fraud_Incidents', color="#FF9F1C")
 
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 3: Fraud Risk Segmentation
-    # -------------------------------------------------------------------------
     st.header("3. Fraud Risk Amount Segmentation")
-    st.markdown(
-        "Transactions grouped into value brackets based on transaction sizing distribution to pinpoint focus fields for risk audit teams.")
-
-    # Group by the generated amount categories
     segment_metrics = paysim_df.groupby('Fraud_Risk_Segment', observed=False).agg(
-        Transactions_Processed=('isFraud', 'count'),
-        Fraud_Cases_Found=('isFraud', 'sum'),
+        Transactions_Processed=('isFraud', 'count'), Fraud_Cases_Found=('isFraud', 'sum'),
         Avg_Transaction_Size=('amount', 'mean')
     )
-
     s_col1, s_col2 = st.columns([1, 1])
-    with s_col1:
-        st.markdown("**Risk Segmentation Volume Overview**")
-        st.dataframe(segment_metrics.style.format({'Avg_Transaction_Size': '${:,.2f}'}), use_container_width=True)
-    with s_col2:
-        st.markdown("**Detected Fraud Incidents Per Size Segment**")
-        st.bar_chart(segment_metrics, y='Fraud_Cases_Found', color="#E71D36")
+    with s_col1: st.dataframe(segment_metrics.style.format({'Avg_Transaction_Size': '${:,.2f}'}),
+                              use_container_width=True)
+    with s_col2: st.bar_chart(segment_metrics, y='Fraud_Cases_Found', color="#E71D36")
 
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 4: List of Fraud Transactions
-    # -------------------------------------------------------------------------
     st.header("4. Audit Trail: Verified Fraud Transactions Ledger")
-    st.markdown(
-        "Filterable, transactional ledger listing every cached operational entry flagged as a verified fraud incident (`isFraud == 1`).")
-
-    # Isolate only explicit fraud entries
     fraud_ledger = paysim_df[paysim_df['isFraud'] == 1].drop(columns=['isFraud'])
-
-    # Optional filtering interactivity widget
     selected_type = st.multiselect("Filter Ledger by Transaction Type:", options=fraud_ledger['type'].unique(),
                                    default=list(fraud_ledger['type'].unique()))
     filtered_ledger = fraud_ledger[fraud_ledger['type'].isin(selected_type)]
-
     st.dataframe(
-        filtered_ledger[['step', 'type', 'amount', 'nameOrig', 'oldbalanceOrg', 'newbalanceOrig', 'nameDest',
-                         'Fraud_Risk_Segment']],
-        use_container_width=True,
-        hide_index=True
-    )
-    st.caption(f"Showing {len(filtered_ledger)} flagged security records matching your selection.")
+        filtered_ledger[['step', 'type', 'amount', 'nameOrig', 'oldbalanceOrg', 'nameDest', 'Fraud_Risk_Segment']],
+        use_container_width=True, hide_index=True)
 
 
-def show_demographics_page():
-    st.title("👥 Page 4: Customer Demographics & Behavior")
-    st.markdown("Exploration of gender distributions, age buckets, tenure cycles, and asset portfolios.")
-    age_slider = st.slider("Filter Customer Age Range", int(churn_df['Age'].min()), int(churn_df['Age'].max()),
-                           (25, 50))
-    filtered_demo = churn_df[(churn_df['Age'] >= age_slider[0]) & (churn_df['Age'] <= age_slider[1])]
-    st.metric(label="Customers in Age Bracket", value=len(filtered_demo))
-    st.dataframe(filtered_demo.head(20), use_container_width=True)
+def show_lifecycle_health_page():
+    st.title("👥 Page 4: Customer Health & Engagement Optimization")
+    st.markdown(
+        "This module monitors health vectors and structural usage metrics across the customer base to power proactive accounts protection.")
+
+    # -------------------------------------------------------------------------
+    # PARAMETER 1 & 2: Health Score & Engagement Score Overview
+    # -------------------------------------------------------------------------
+    st.header("1. Health & Engagement Score Tracking")
+
+    avg_health = float(churn_df['Health_Score'].mean())
+    avg_engagement = float(churn_df['Engagement_Score'].mean())
+
+    m_col1, m_col2 = st.columns(2)
+    with m_col1:
+        st.metric(
+            label="Average Account Health Score",
+            value=f"{avg_health:.2f} / 100",
+            help="High values mean a strong product retention probability across the portfolio."
+        )
+    with m_col2:
+        st.metric(
+            label="Average Product Engagement Score",
+            value=f"{avg_engagement:.2f} / 100",
+            help="Measures product cross-selling depth and interaction consistency."
+        )
+
+    st.markdown("**Core Metrics Distribution (Health vs. Engagement Summary)**")
+    # Quick structural view using a grouped dataset overview
+    summary_by_geo = churn_df.groupby('Geography')[['Health_Score', 'Engagement_Score']].mean()
+    st.dataframe(summary_by_geo, use_container_width=True)
+
+    st.divider()
+
+    # -------------------------------------------------------------------------
+    # PARAMETER 3: Retention Suggestions
+    # -------------------------------------------------------------------------
+    st.header("2. Prescriptive Retention Playbooks")
+    st.markdown(
+        "Select a segment level below to display targeted, data-backed operational suggestions for customer success teams.")
+
+    risk_selector = st.selectbox("Select Target Risk Segment for Playbook:",
+                                 ["High Risk Profiles", "Medium Risk Profiles", "Low Risk Profiles"])
+
+    if risk_selector == "High Risk Profiles":
+        st.error("🚨 **High Risk Playbook (Health Score < 30)**")
+        st.markdown("""
+        - **Primary Triggers Isolated:** Extreme risk drops concentrated in accounts with 3-4 financial products or inactive statuses in Germany.
+        - **Retention Suggestions:**
+            1. **Dedicated Account Outreach:** Assign relationship managers to accounts with 3+ products to cross-verify process bottlenecks.
+            2. **Targeted Fee Relief Waivers:** Deploy temporary fee-free incentives for account maintenance matching high-value balance groups.
+            3. **Re-engagement Email Sequences:** Trigger custom workflows highlighting regional feature improvements for inactive profiles.
+        """)
+        # Show segment metrics
+        segment_slice = churn_df[churn_df['Risk_Tier'] == 'High Risk']
+        st.dataframe(
+            segment_slice[['CustomerId', 'Surname', 'Geography', 'Age', 'Health_Score', 'Engagement_Score']].head(10),
+            use_container_width=True)
+
+    elif risk_selector == "Medium Risk Profiles":
+        st.warning("⚠️ **Medium Risk Playbook (30 <= Health Score < 70)**")
+        st.markdown("""
+        - **Primary Triggers Isolated:** Moderate balance variances combined with low tenure interaction counts.
+        - **Retention Suggestions:**
+            1. **Cross-Sell Incentives:** Offer reward boosts on under-utilized product offerings to turn single-product profiles into stable, two-product pairings.
+            2. **Financial Advisory Matchmaking:** Pair medium-risk users with dedicated investment planning specialists.
+            3. **Mobile App Utilization Promotion:** Offer targeted bonuses for users setting up automated transfers or recurrent deposits.
+        """)
+        segment_slice = churn_df[churn_df['Risk_Tier'] == 'Medium Risk']
+        st.dataframe(
+            segment_slice[['CustomerId', 'Surname', 'Geography', 'Age', 'Health_Score', 'Engagement_Score']].head(10),
+            use_container_width=True)
+
+    else:
+        st.success("✅ **Low Risk Playbook (Health Score >= 70)**")
+        st.markdown("""
+        - **Primary Triggers Isolated:** Stable customer structures characterized by active usage statuses and 2-product pairings.
+        - **Retention Suggestions:**
+            1. **Loyalty & Advocacy Enlistment:** Invite high-scoring advocates to exclusive product testing and referral feedback circles.
+            2. **Premium Credit Upgrades:** Auto-approve qualified users for tier upgrades or preferred limits on existing credit lines.
+        """)
+        segment_slice = churn_df[churn_df['Risk_Tier'] == 'Low Risk']
+        st.dataframe(
+            segment_slice[['CustomerId', 'Surname', 'Geography', 'Age', 'Health_Score', 'Engagement_Score']].head(10),
+            use_container_width=True)
 
 
 def show_predictive_modeling_page():
@@ -307,7 +344,7 @@ page_selection = st.sidebar.radio(
         "1. Executive KPI Overview",
         "2. Customer Churn Deep-Dive",
         "3. Transaction Fraud Analysis",
-        "4. Customer Demographics",
+        "4. Lifecycle & Health Optimization",
         "5. Predictive Risk Modeling"
     ]
 )
@@ -322,7 +359,7 @@ elif page_selection == "2. Customer Churn Deep-Dive":
     show_churn_analysis_page()
 elif page_selection == "3. Transaction Fraud Analysis":
     show_fraud_insights_page()
-elif page_selection == "4. Customer Demographics":
-    show_demographics_page()
+elif page_selection == "4. Lifecycle & Health Optimization":
+    show_lifecycle_health_page()
 elif page_selection == "5. Predictive Risk Modeling":
     show_predictive_modeling_page()
