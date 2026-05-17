@@ -125,18 +125,37 @@ except Exception as e:
 
 def build_customer_input(credit_score, geography, gender, age, tenure, balance,
                          num_products, has_cr_card, is_active_member, estimated_salary):
-    return pd.DataFrame([{
+    df = pd.DataFrame([{
         "CreditScore": credit_score,
-        "Gender": 1 if gender == "Male" else 0,
+        "Geography": geography,
+        "Gender": gender,
         "Age": age,
         "Tenure": tenure,
         "Balance": balance,
+        "NumOfProducts": num_products,
         "HasCrCard": int(has_cr_card),
         "IsActiveMember": int(is_active_member),
         "EstimatedSalary": estimated_salary,
-        "Geography_Germany": 1 if geography == "Germany" else 0,
-        "Geography_Spain": 1 if geography == "Spain" else 0,
     }])
+
+    # Replicate training feature engineering
+    df["NumOfProducts"] = df["NumOfProducts"].replace({3: "3 or More", 4: "3 or More"})
+    df.loc[df["Age"] > 75, "Age"] = 75
+    df["Age_Group"] = pd.cut(df["Age"], [0, 30, 45, 65, 99], labels=["18-30", "31-45", "46-65", "66-99"])
+    df["Balance_to_Salary"] = df["Balance"] / df["EstimatedSalary"]
+    df["Gender"] = (df["Gender"] == "Male").astype(int)
+
+    # OHE matching training (drop_first=True)
+    df = pd.get_dummies(df, columns=["Geography", "NumOfProducts", "Age_Group"], drop_first=True)
+
+    # Ensure all OHE columns exist (missing when a category isn't present in single-row input)
+    for col in ["Geography_Germany", "Geography_Spain",
+                "NumOfProducts_2", "NumOfProducts_3 or More",
+                "Age_Group_31-45", "Age_Group_46-65", "Age_Group_66-99"]:
+        if col not in df.columns:
+            df[col] = 0
+
+    return df
 
 
 # -----------------------------------------------------------------------------
@@ -226,8 +245,10 @@ def show_AI_analyst_page():
     clf = load_assets()
     feature_cols = [
         "CreditScore", "Gender", "Age", "Tenure", "Balance",
-        "HasCrCard", "IsActiveMember", "EstimatedSalary",
-        "Geography_Germany", "Geography_Spain","NumOfProducts",
+        "HasCrCard", "IsActiveMember", "EstimatedSalary", "Balance_to_Salary",
+        "Geography_Germany", "Geography_Spain",
+        "NumOfProducts_2", "NumOfProducts_3 or More",
+        "Age_Group_31-45", "Age_Group_46-65", "Age_Group_66-99",
     ]
 
     # ── Input form ────────────────────────────────────────────────────────────────
@@ -261,13 +282,6 @@ def show_AI_analyst_page():
             num_products, has_cr_card, is_active_member, estimated_salary
         )
         input_df = input_df[feature_cols]
-        input_df.loc[(input_df["Age"] > 75), "Age"] = 75
-        input_df["Balance_to_Salary"] = input_df["Balance"] / input_df["EstimatedSalary"]
-        input_df["Age_Group"] = pd.cut(input_df["Age"], [0, 30, 45, 65, 99], labels=["18-30", "31-45", "46-65", "66-99"])
-        input_df["NumOfProducts"] = input_df["NumOfProducts"].replace({3: "3 or More", 4: "3 or More"})
-        input_df.loc[(input_df["Age"] > 75), "Age"] = 75
-        input_df["Age_Group"] = pd.cut(input_df["Age"], [0, 30, 45, 65, 99], labels=["18-30", "31-45", "46-65", "66-99"])
-        input_df["Balance_to_Salary"] = input_df["Balance"] / input_df["EstimatedSalary"]
 
         churn_prob = clf.predict_proba(input_df)[0][1]
         churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
