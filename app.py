@@ -31,8 +31,10 @@ def load_churn_data():
 
 @st.cache_data(ttl=3600)
 def load_paysim_data():
-    """Loads and caches the PaySim fraud detection dataset."""
-    return pd.read_csv("data/PaySim.csv")
+    """Loads and caches the PaySim fraud detection dataset from a public URL."""
+    # Replace this with your actual public URL
+    url = "https://storage.googleapis.com/finguard-ai/paysim.csv"
+    return pd.read_csv(url)
 
 
 @st.cache_data(ttl=3600)
