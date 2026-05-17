@@ -227,7 +227,7 @@ def show_AI_analyst_page():
     feature_cols = [
         "CreditScore", "Gender", "Age", "Tenure", "Balance",
         "HasCrCard", "IsActiveMember", "EstimatedSalary",
-        "Geography_Germany", "Geography_Spain"
+        "Geography_Germany", "Geography_Spain","NumOfProducts"
     ]
 
     # ── Input form ────────────────────────────────────────────────────────────────
