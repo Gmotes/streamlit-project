@@ -33,23 +33,10 @@ def load_churn_data():
 def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset from a public URL."""
     # Replace this with your actual public URL
-    url = "https://storage.googleapis.com/finguard-ai/paysim.csv"
+    url = "https://storage.googleapis.com/finguard-ai/PaySim.parquet"
     # Define optimized data types
-    schema = {
-        "step": "int32",
-        "type": "category",  # 'CASH_OUT', 'PAYMENT', etc. take much less memory as a category
-        "amount": "float32",
-        "nameOrig": "object",
-        "oldbalanceOrg": "float32",
-        "newbalanceOrig": "float32",
-        "nameDest": "object",
-        "oldbalanceDest": "float32",
-        "newbalanceDest": "float32",
-        "isFraud": "int8",  # 0 or 1 fits perfectly in an 8-bit integer
-        "isFlaggedFraud": "int8",
-    }
 
-    return pd.read_csv(url, dtype=schema)
+    return pd.read_parquet(url)
 
 
 @st.cache_data(ttl=3600)
