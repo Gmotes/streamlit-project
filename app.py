@@ -35,16 +35,13 @@ def process_churn_analytics(df):
     X = df[features]
     y = df['Exited']
 
-    # Train Random Forest Classifier from cache
     rf = RandomForestClassifier(n_estimators=50, random_state=42)
     rf.fit(X, y)
 
-    # Calculate custom metrics
     df_scored = df.copy()
     df_scored['Churn_Probability'] = rf.predict_proba(X)[:, 1]
     df_scored['Churn_Score'] = (df_scored['Churn_Probability'] * 100).round(2)
 
-    # Bin into Risk Tiers
     def get_risk_tier(prob):
         if prob < 0.30:
             return 'Low Risk'
@@ -55,20 +52,45 @@ def process_churn_analytics(df):
 
     df_scored['Risk_Tier'] = df_scored['Churn_Probability'].apply(get_risk_tier)
 
-    # Feature Importances Dataframe
     importance_df = pd.DataFrame({
         'Feature': features,
         'Importance': rf.feature_importances_
-    }).sort_values('Importance', ascending=True)  # Ascending for nice horizontal bar charts
+    }).sort_values('Importance', ascending=True)
 
     return df_scored, importance_df
+
+
+@st.cache_data(ttl=3600)
+def process_fraud_segmentation(df):
+    """Processes fraud segments based on transaction sizes."""
+    df_fraud = df.copy()
+
+    # Calculate quantiles for fraud transactions to form risk segment thresholds dynamically
+    fraud_amounts = df_fraud[df_fraud['isFraud'] == 1]['amount']
+    if not fraud_amounts.empty:
+        q1 = fraud_amounts.quantile(0.33)
+        q2 = fraud_amounts.quantile(0.66)
+    else:
+        q1, q2 = 10000, 100000  # Fallbacks
+
+    def segment_amount_risk(amt):
+        if amt <= q1:
+            return 'Tier 1: Low-Value Risk'
+        elif amt <= q2:
+            return 'Tier 2: Mid-Value Risk'
+        else:
+            return 'Tier 3: High-Value Risk'
+
+    df_fraud['Fraud_Risk_Segment'] = df_fraud['amount'].apply(segment_amount_risk)
+    return df_fraud
 
 
 # Safe initialization of cached datasets
 try:
     churn_raw = load_churn_data()
-    paysim_df = load_paysim_data()
+    paysim_raw = load_paysim_data()
     churn_df, feature_importance_df = process_churn_analytics(churn_raw)
+    paysim_df = process_fraud_segmentation(paysim_raw)
 except Exception as e:
     st.error(
         f"Error loading datasets. Please ensure 'Churn_Modelling.csv' and 'PaySim.csv' are in the working directory. Details: {e}")
@@ -84,17 +106,14 @@ def show_overview_page():
     st.markdown(
         "Welcome to the central command dashboard. Below are the key performance metrics computed dynamically from your cached datasets.")
 
-    # Calculate Metrics
     total_customers = int(churn_df['CustomerId'].nunique())
     churn_rate = float(churn_df['Exited'].mean() * 100)
     active_rate = float(churn_df['IsActiveMember'].mean() * 100)
     fraud_rate = float(paysim_df['isFraud'].mean() * 100)
 
-    # Display Metrics in Columns
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric(label="Total Customers", value=f"{total_customers:,}",
-                  help="Total unique customer identification numbers.")
+        st.metric(label="Total Customers", value=f"{total_customers:,}")
     with col2:
         st.metric(label="Customer Churn Rate", value=f"{churn_rate:.2f}%", delta=f"-{churn_rate:.1f}%",
                   delta_color="inverse")
@@ -116,166 +135,104 @@ def show_overview_page():
 def show_churn_analysis_page():
     st.title("📉 Page 2: Customer Churn Deep-Dive")
     st.markdown(
-        "This enhanced page evaluates organizational churn liabilities using predictive distributions, group segmentations, feature importances, and discrete customer score lookups.")
+        "This module evaluates organizational churn liabilities using predictive distributions, group segmentations, feature importances, and discrete customer score lookups.")
 
-    # -------------------------------------------------------------------------
-    # PARAMETER 1: Churn Risk Distribution
-    # -------------------------------------------------------------------------
     st.header("1. Churn Risk Distribution")
     dist_col1, dist_col2 = st.columns([1, 2])
-
     with dist_col1:
-        st.markdown("**Risk Tier Composition**")
         tier_counts = churn_df['Risk_Tier'].value_counts()
         for tier in ['Low Risk', 'Medium Risk', 'High Risk']:
             count = tier_counts.get(tier, 0)
             percentage = (count / len(churn_df)) * 100
             st.metric(label=tier, value=f"{count:,}", delta=f"{percentage:.1f}% of total")
-
     with dist_col2:
-        st.markdown("**Risk Score Histogram (0% - 100%)**")
-        # Calculate histogram bins using numpy
         counts, bins = np.histogram(churn_df['Churn_Score'], bins=10, range=(0, 100))
-        hist_df = pd.DataFrame({
-            'Risk Range': [f"{int(bins[i])}-{int(bins[i + 1])}%" for i in range(len(bins) - 1)],
-            'Customer Count': counts
-        }).set_index('Risk Range')
+        hist_df = pd.DataFrame({'Risk Range': [f"{int(bins[i])}-{int(bins[i + 1])}%" for i in range(len(bins) - 1)],
+                                'Customer Count': counts}).set_index('Risk Range')
         st.bar_chart(hist_df, y='Customer Count', color="#FF4B4B")
 
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 2: Churn Segmentations
-    # -------------------------------------------------------------------------
     st.header("2. Churn Segmentations")
-    st.markdown("Analyze how the realized churn rate varies across diverse categorical attributes.")
-
-    seg_tab1, seg_tab2, seg_tab3 = st.tabs(
-        ["Geography Segmentation", "Product Portfolio Volatility", "Age Demographics"])
-
+    seg_tab1, seg_tab2 = st.tabs(["Geography Segmentation", "Product Portfolio Volatility"])
     with seg_tab1:
-        geo_seg = churn_df.groupby('Geography')['Exited'].mean() * 100
-        geo_df = pd.DataFrame({'Churn Rate (%)': geo_seg.round(2)})
+        geo_df = pd.DataFrame({'Churn Rate (%)': (churn_df.groupby('Geography')['Exited'].mean() * 100).round(2)})
         st.dataframe(geo_df, use_container_width=True)
         st.bar_chart(geo_df)
-
     with seg_tab2:
-        prod_seg = churn_df.groupby('NumOfProducts')['Exited'].mean() * 100
-        prod_df = pd.DataFrame({'Churn Rate (%)': prod_seg.round(2)})
+        prod_df = pd.DataFrame({'Churn Rate (%)': (churn_df.groupby('NumOfProducts')['Exited'].mean() * 100).round(2)})
         st.dataframe(prod_df, use_container_width=True)
         st.bar_chart(prod_df)
 
-    with seg_tab3:
-        # Create dynamic age groupings
-        churn_df['Age_Group'] = pd.cut(churn_df['Age'], bins=[0, 30, 40, 50, 60, 100],
-                                       labels=['<30', '30-40', '40-50', '50-60', '60+'])
-        age_seg = churn_df.groupby('Age_Group', observed=False)['Exited'].mean() * 100
-        age_df = pd.DataFrame({'Churn Rate (%)': age_seg.round(2)})
-        st.dataframe(age_df, use_container_width=True)
-        st.bar_chart(age_df)
-
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 3: Churn Feature Importance
-    # -------------------------------------------------------------------------
     st.header("3. Churn Feature Importance")
-    st.markdown(
-        "The machine learning model evaluated the following structural feature coefficients to isolate the primary triggers of customer churn.")
-
-    chart_data = feature_importance_df.set_index('Feature')
-    st.bar_chart(chart_data, y='Importance', color="#29B5E8")
+    st.bar_chart(feature_importance_df.set_index('Feature'), y='Importance', color="#29B5E8")
 
     st.divider()
-
-    # -------------------------------------------------------------------------
-    # PARAMETER 4: Customer Based Churn Score Lookup
-    # -------------------------------------------------------------------------
     st.header("4. Customer Based Churn Score Lookup")
-    st.markdown("Search for an individual customer record below to audit their real-time calculated risk profile.")
-
-    search_col1, search_col2 = st.columns([1, 2])
-
-    with search_col1:
-        search_id = st.number_input("Enter Unique Customer ID:", min_value=int(churn_df['CustomerId'].min()),
-                                    max_value=int(churn_df['CustomerId'].max()), value=15634602)
-
+    search_id = st.number_input("Enter Unique Customer ID:", min_value=int(churn_df['CustomerId'].min()),
+                                max_value=int(churn_df['CustomerId'].max()), value=15634602)
     customer_record = churn_df[churn_df['CustomerId'] == search_id]
-
     if not customer_record.empty:
-        with search_col2:
-            score = float(customer_record['Churn_Score'].iloc[0])
-            tier = str(customer_record['Risk_Tier'].iloc[0])
-            surname = str(customer_record['Surname'].iloc[0])
-
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Customer Name", surname)
-            sc2.metric("Calculated Churn Score", f"{score}%")
-            sc3.metric("Assigned Risk Bucket", tier)
-
-        st.markdown("**Complete Analytical Profile Vector For Customer:**")
         st.dataframe(customer_record[
-                         ['CustomerId', 'Surname', 'CreditScore', 'Geography', 'Gender', 'Age', 'Tenure', 'Balance',
-                          'NumOfProducts', 'IsActiveMember', 'Churn_Score', 'Risk_Tier']], use_container_width=True)
+                         ['CustomerId', 'Surname', 'CreditScore', 'Geography', 'Gender', 'Age', 'Churn_Score',
+                          'Risk_Tier']], use_container_width=True)
     else:
-        st.warning("No record matches the provided Customer ID. Please review the dataset identifier values.")
+        st.warning("No record matches the provided Customer ID.")
 
 
 def show_fraud_insights_page():
     st.title("🔒 Page 3: Transaction Fraud Analysis")
-    st.markdown("Granular insights into suspicious transfers, transaction volumes, and flagged system alerts.")
-    type_filter = st.selectbox("Select Transaction Type", options=paysim_df['type'].unique())
-    filtered_paysim = paysim_df[paysim_df['type'] == type_filter]
-    st.dataframe(filtered_paysim.head(50), use_container_width=True)
+    st.markdown(
+        "This updated module tracks financial transactional vectors from cache to systematically isolate fraudulent activity trends.")
 
+    # -------------------------------------------------------------------------
+    # PARAMETER 1: Fraud Rate
+    # -------------------------------------------------------------------------
+    st.header("1. Global System Fraud Rate")
 
-def show_demographics_page():
-    st.title("👥 Page 4: Customer Demographics & Behavior")
-    st.markdown("Exploration of gender distributions, age buckets, tenure cycles, and asset portfolios.")
-    age_slider = st.slider("Filter Customer Age Range", int(churn_df['Age'].min()), int(churn_df['Age'].max()),
-                           (25, 50))
-    filtered_demo = churn_df[(churn_df['Age'] >= age_slider[0]) & (churn_df['Age'] <= age_slider[1])]
-    st.metric(label="Customers in Age Bracket", value=len(filtered_demo))
-    st.dataframe(filtered_demo.head(20), use_container_width=True)
+    total_tx = len(paysim_df)
+    fraud_tx_count = int(paysim_df['isFraud'].sum())
+    global_fraud_rate = (fraud_tx_count / total_tx) * 100
+    total_fraud_volume = paysim_df[paysim_df['isFraud'] == 1]['amount'].sum()
 
+    f_col1, f_col2, f_col3 = st.columns(3)
+    with f_col1:
+        st.metric(label="Total Logged Transactions", value=f"{total_tx:,}")
+    with f_col2:
+        st.metric(label="Identified Fraud Incident Records", value=f"{fraud_tx_count:,}",
+                  delta=f"{global_fraud_rate:.3f}% Fraud Rate", delta_color="inverse")
+    with f_col3:
+        st.metric(label="Total Capital Impact At Risk", value=f"${total_fraud_volume:,.2f}")
 
-def show_predictive_modeling_page():
-    st.title("🤖 Page 5: Predictive Modeling & Simulation")
-    st.markdown("What-if scenario simulators or machine learning inference templates for predictive risk mitigation.")
-    st.success(
-        "This placeholder page can be used to load pickled ML models to run real-time churn predictions or fraud risk scoring profiles based on custom inputs.")
-    st.number_input("Input Sample Transaction Amount ($)", min_value=0.0, max_value=1000000.0, value=500.0)
-    st.button("Run Simulation Risk Assessment")
+    st.divider()
 
+    # -------------------------------------------------------------------------
+    # PARAMETER 2: Fraud by Transaction Type
+    # -------------------------------------------------------------------------
+    st.header("2. Fraud Incidence by Transaction Type")
 
-# -----------------------------------------------------------------------------
-# 3. SIDEBAR NAVIGATION CONTROLLER
-# -----------------------------------------------------------------------------
-st.sidebar.title("Navigation Menu")
-st.sidebar.markdown("Navigate across the 5 analytical modules below:")
+    # Calculate incidence count and mean rate per category type
+    type_metrics = paysim_df.groupby('type').agg(
+        Total_Transactions=('isFraud', 'count'),
+        Fraud_Incidents=('isFraud', 'sum'),
+        Fraud_Rate_Percentage=('isFraud', lambda x: (x.mean() * 100).round(4))
+    ).sort_values(by='Fraud_Incidents', ascending=False)
 
-page_selection = st.sidebar.radio(
-    "Select a Page:",
-    [
-        "1. Executive KPI Overview",
-        "2. Customer Churn Deep-Dive",
-        "3. Transaction Fraud Analysis",
-        "4. Customer Demographics",
-        "5. Predictive Risk Modeling"
-    ]
-)
+    t_col1, t_col2 = st.columns([1, 1])
+    with t_col1:
+        st.markdown("**Transaction Type Matrix Table**")
+        st.dataframe(type_metrics, use_container_width=True)
+    with t_col2:
+        st.markdown("**Fraud Count Distribution by Type**")
+        st.bar_chart(type_metrics, y='Fraud_Incidents', color="#FF9F1C")
 
-st.sidebar.divider()
-st.sidebar.caption("⚡ *Data status: Fully cached into application memory via Streamlit decorators.*")
+    st.divider()
 
-# Route to the appropriate page function
-if page_selection == "1. Executive KPI Overview":
-    show_overview_page()
-elif page_selection == "2. Customer Churn Deep-Dive":
-    show_churn_analysis_page()
-elif page_selection == "3. Transaction Fraud Analysis":
-    show_fraud_insights_page()
-elif page_selection == "4. Customer Demographics":
-    show_demographics_page()
-elif page_selection == "5. Predictive Risk Modeling":
-    show_predictive_modeling_page()
+    # -------------------------------------------------------------------------
+    # PARAMETER 3: Fraud Risk Segmentation
+    # -------------------------------------------------------------------------
+    st.header("3. Fraud Risk Amount Segmentation")
+    st.markdown(
+        "Transactions grouped into value brackets based on transaction sizing distribution to pinpoint focus fields for risk audit teams.")
+
+    # Group by the generated
