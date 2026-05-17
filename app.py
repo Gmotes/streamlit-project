@@ -18,13 +18,13 @@ st.set_page_config(
 @st.cache_data(ttl=3600)
 def load_churn_data():
     """Loads and caches the customer churn dataset."""
-    return pd.read_csv("Churn_Modelling.csv")
+    return pd.read_csv("data/Churn_Modelling.csv")
 
 
 @st.cache_data(ttl=3600)
 def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset."""
-    return pd.read_csv("PaySim.csv")
+    return pd.read_csv("data/PaySim.csv")
 
 
 @st.cache_data(ttl=3600)
