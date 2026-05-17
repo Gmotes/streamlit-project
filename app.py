@@ -263,7 +263,8 @@ def show_AI_analyst_page():
         input_df = input_df[feature_cols]
         input_df.loc[(input_df["Age"] > 75), "Age"] = 75
         input_df["Balance_to_Salary"] = input_df["Balance"] / input_df["EstimatedSalary"]
-
+        input_df["Age_Group"] = pd.cut(input_df["Age"], [0, 30, 45, 65, 99], labels=["18-30", "31-45", "46-65", "66-99"])
+        
         churn_prob = clf.predict_proba(input_df)[0][1]
         churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
 
