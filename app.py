@@ -38,7 +38,7 @@ def load_paysim_data():
 
     df = duckdb.query(
         f"""
-            SELECT type, isFraud, amout
+            SELECT type, isFraud, amount
             FROM read_parquet('{url}')
         """
     ).df()
