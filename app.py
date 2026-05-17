@@ -34,7 +34,7 @@ def load_churn_data():
 @st.cache_data(ttl=3600)
 def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset from a public URL."""
-    url = "https://storage.googleapis.com/finguard-ai/PaySim.parquet"
+    url =  st.secrets["PARQUET_URL"]
 
     df = duckdb.query(
         f"""
