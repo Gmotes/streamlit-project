@@ -212,7 +212,7 @@ def show_fraud_insights_page():
     st.bar_chart(segment_metrics, color="#E71D36")
     st.divider()
     st.header("4. Audit Trail: Verified Fraud Transactions Ledger")
-    st.dataframe(paysim_df[paysim_df['isFraud'] == 1].drop(columns=['isFraud']).head(100), use_container_width=True)
+    #st.dataframe(paysim_df[paysim_df['isFraud'] == 1].drop(columns=['isFraud']).head(100), use_container_width=True)
 
 
 def show_lifecycle_health_page():
