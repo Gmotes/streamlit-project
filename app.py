@@ -137,12 +137,6 @@ def build_customer_input(credit_score, geography, gender, age, tenure, balance,
         "EstimatedSalary": estimated_salary,
         "Geography_Germany": 1 if geography == "Germany" else 0,
         "Geography_Spain": 1 if geography == "Spain" else 0,
-        "BalanceSalaryRatio": balance / (estimated_salary + 1),
-        "ZeroBalance": int(balance == 0),
-        "ProductsPerTenure": num_products / (tenure + 1),
-        "ActiveWithBalance": int(is_active_member) * int(balance > 0),
-        "CreditScorePerAge": credit_score / age,
-        "AgeGroup": 0 if age < 35 else (1 if age <= 55 else 2),
     }])
 
 
@@ -234,9 +228,7 @@ def show_AI_analyst_page():
     feature_cols = [
         "CreditScore", "Gender", "Age", "Tenure", "Balance", "NumOfProducts",
         "HasCrCard", "IsActiveMember", "EstimatedSalary",
-        "Geography_Germany", "Geography_Spain",
-        "BalanceSalaryRatio", "ZeroBalance", "ProductsPerTenure",
-        "ActiveWithBalance", "CreditScorePerAge", "AgeGroup",
+        "Geography_Germany", "Geography_Spain"
     ]
 
     # ── Input form ────────────────────────────────────────────────────────────────
@@ -270,6 +262,9 @@ def show_AI_analyst_page():
             num_products, has_cr_card, is_active_member, estimated_salary,
         )
         input_df = input_df[feature_cols]
+        input_df.loc[(input_df["Age"] > 75), "Age"] = 75
+        input_df["Age_Group"] = pd.cut(input_df["Age"], [0, 30, 45, 65, 99], labels=["18-30", "31-45", "46-65", "66-99"])
+        input_df["Balance_to_Salary"] = input_df["Balance"] / input_df["EstimatedSalary"]
 
         churn_prob = clf.predict_proba(input_df)[0][1]
         churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
