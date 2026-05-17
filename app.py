@@ -354,8 +354,13 @@ def show_AI_analyst_page():
 # -----------------------------------------------------------------------------
 # 3. SIDEBAR NAVIGATION CONTROLLER
 # -----------------------------------------------------------------------------
-st.sidebar.title("Navigation Menu")
-st.sidebar.markdown("Navigate across the 5 analytical modules below:")
+
+st.image(
+    "https://img.icons8.com/fluency/96/shield.png",
+    width=60,
+)
+st.title("FinGuard AI")
+st.markdown("Financial Intelligence Dashboard")
 
 page_selection = st.sidebar.radio(
     "Select a Page:",
