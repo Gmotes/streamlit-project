@@ -38,7 +38,7 @@ def load_paysim_data():
 
     df = duckdb.query(
         f"""
-            SELECT type, COUNT(*) as total_transactions, SUM(isFraud) as total_fraud
+            SELECT type, isFraud
             FROM read_parquet('{url}')
             GROUP BY type
         """
