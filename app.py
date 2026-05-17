@@ -40,7 +40,6 @@ def load_paysim_data():
         f"""
             SELECT type, isFraud
             FROM read_parquet('{url}')
-            GROUP BY type
         """
     ).df()
 
