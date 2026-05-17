@@ -364,7 +364,7 @@ page_selection = st.sidebar.radio(
         "2. Customer Churn Deep-Dive",
         "3. Transaction Fraud Analysis",
         "4. Lifecycle & Health Optimization",
-        "5. Action Recommendation"
+        "5. AI Analysis",
     ]
 )
 
