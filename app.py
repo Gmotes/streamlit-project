@@ -235,4 +235,94 @@ def show_fraud_insights_page():
     st.markdown(
         "Transactions grouped into value brackets based on transaction sizing distribution to pinpoint focus fields for risk audit teams.")
 
-    # Group by the generated
+    # Group by the generated amount categories
+    segment_metrics = paysim_df.groupby('Fraud_Risk_Segment', observed=False).agg(
+        Transactions_Processed=('isFraud', 'count'),
+        Fraud_Cases_Found=('isFraud', 'sum'),
+        Avg_Transaction_Size=('amount', 'mean')
+    )
+
+    s_col1, s_col2 = st.columns([1, 1])
+    with s_col1:
+        st.markdown("**Risk Segmentation Volume Overview**")
+        st.dataframe(segment_metrics.style.format({'Avg_Transaction_Size': '${:,.2f}'}), use_container_width=True)
+    with s_col2:
+        st.markdown("**Detected Fraud Incidents Per Size Segment**")
+        st.bar_chart(segment_metrics, y='Fraud_Cases_Found', color="#E71D36")
+
+    st.divider()
+
+    # -------------------------------------------------------------------------
+    # PARAMETER 4: List of Fraud Transactions
+    # -------------------------------------------------------------------------
+    st.header("4. Audit Trail: Verified Fraud Transactions Ledger")
+    st.markdown(
+        "Filterable, transactional ledger listing every cached operational entry flagged as a verified fraud incident (`isFraud == 1`).")
+
+    # Isolate only explicit fraud entries
+    fraud_ledger = paysim_df[paysim_df['isFraud'] == 1].drop(columns=['isFraud'])
+
+    # Optional filtering interactivity widget
+    selected_type = st.multiselect("Filter Ledger by Transaction Type:", options=fraud_ledger['type'].unique(),
+                                   default=list(fraud_ledger['type'].unique()))
+    filtered_ledger = fraud_ledger[fraud_ledger['type'].isin(selected_type)]
+
+    st.dataframe(
+        filtered_ledger[['step', 'type', 'amount', 'nameOrig', 'oldbalanceOrg', 'newbalanceOrig', 'nameDest',
+                         'Fraud_Risk_Segment']],
+        use_container_width=True,
+        hide_index=True
+    )
+    st.caption(f"Showing {len(filtered_ledger)} flagged security records matching your selection.")
+
+
+def show_demographics_page():
+    st.title("👥 Page 4: Customer Demographics & Behavior")
+    st.markdown("Exploration of gender distributions, age buckets, tenure cycles, and asset portfolios.")
+    age_slider = st.slider("Filter Customer Age Range", int(churn_df['Age'].min()), int(churn_df['Age'].max()),
+                           (25, 50))
+    filtered_demo = churn_df[(churn_df['Age'] >= age_slider[0]) & (churn_df['Age'] <= age_slider[1])]
+    st.metric(label="Customers in Age Bracket", value=len(filtered_demo))
+    st.dataframe(filtered_demo.head(20), use_container_width=True)
+
+
+def show_predictive_modeling_page():
+    st.title("🤖 Page 5: Predictive Modeling & Simulation")
+    st.markdown("What-if scenario simulators or machine learning inference templates for predictive risk mitigation.")
+    st.success(
+        "This placeholder page can be used to load pickled ML models to run real-time churn predictions or fraud risk scoring profiles.")
+    st.number_input("Input Sample Transaction Amount ($)", min_value=0.0, max_value=1000000.0, value=500.0)
+    st.button("Run Simulation Risk Assessment")
+
+
+# -----------------------------------------------------------------------------
+# 3. SIDEBAR NAVIGATION CONTROLLER
+# -----------------------------------------------------------------------------
+st.sidebar.title("Navigation Menu")
+st.sidebar.markdown("Navigate across the 5 analytical modules below:")
+
+page_selection = st.sidebar.radio(
+    "Select a Page:",
+    [
+        "1. Executive KPI Overview",
+        "2. Customer Churn Deep-Dive",
+        "3. Transaction Fraud Analysis",
+        "4. Customer Demographics",
+        "5. Predictive Risk Modeling"
+    ]
+)
+
+st.sidebar.divider()
+st.sidebar.caption("⚡ *Data status: Fully cached into application memory via Streamlit decorators.*")
+
+# Route to the appropriate page function
+if page_selection == "1. Executive KPI Overview":
+    show_overview_page()
+elif page_selection == "2. Customer Churn Deep-Dive":
+    show_churn_analysis_page()
+elif page_selection == "3. Transaction Fraud Analysis":
+    show_fraud_insights_page()
+elif page_selection == "4. Customer Demographics":
+    show_demographics_page()
+elif page_selection == "5. Predictive Risk Modeling":
+    show_predictive_modeling_page()
