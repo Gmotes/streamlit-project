@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestClassifier
 import pickle
 import plotly.express as px
 from groq import Groq
+import pyarrow.parquet as pq
 
 
 api_key = st.secrets["GROQ_API_KEY"]
@@ -34,9 +35,11 @@ def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset from a public URL."""
     # Replace this with your actual public URL
     url = "https://storage.googleapis.com/finguard-ai/PaySim.parquet"
-    # Define optimized data types
+    # PyArrow reads the file much more efficiently than Pandas
+    table = pq.read_table(url)
 
-    return pd.read_parquet(url)
+    # Convert it to a lightweight dataframe or keep it as a table
+    return table.to_pandas()
 
 
 @st.cache_data(ttl=3600)
