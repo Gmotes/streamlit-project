@@ -6,6 +6,7 @@ import pickle
 import plotly.express as px
 from groq import Groq
 import pyarrow.parquet as pq
+import duckdb
 
 
 api_key = st.secrets["GROQ_API_KEY"]
@@ -33,13 +34,17 @@ def load_churn_data():
 @st.cache_data(ttl=3600)
 def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset from a public URL."""
-    # Replace this with your actual public URL
     url = "https://storage.googleapis.com/finguard-ai/PaySim.parquet"
-    # PyArrow reads the file much more efficiently than Pandas
-    table = pq.read_table(url)
 
-    # Convert it to a lightweight dataframe or keep it as a table
-    return table.to_pandas()
+    df = duckdb.query(
+        f"""
+            SELECT type, COUNT(*) as total_transactions, SUM(isFraud) as total_fraud
+            FROM read_parquet('{url}')
+            GROUP BY type
+        """
+    ).df()
+
+    return df
 
 
 @st.cache_data(ttl=3600)
