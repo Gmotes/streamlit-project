@@ -5,7 +5,6 @@ from sklearn.ensemble import RandomForestClassifier
 import pickle
 import plotly.express as px
 from groq import Groq
-import pyarrow.parquet as pq
 import duckdb
 
 
@@ -45,6 +44,18 @@ def load_paysim_data():
     ).df()
 
     return df
+
+@st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
+def load_churn_model():
+    with open('xgb_churn_model.pkl', 'rb') as model_file:
+        model = pickle.load(model_file)
+    return model
+
+@st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
+def load_fraud_model():
+    with open('fraud_detection_model.pkl', 'rb') as model_file:
+        model = pickle.load(model_file)
+    return model
 
 
 @st.cache_data(ttl=3600)
@@ -116,12 +127,6 @@ def process_analytical_engine(churn_df, paysim_df):
 
     return df_scored, importance_df, df_fraud
 
-@st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
-def load_assets():
-    with open('xgb_churn_model.pkl', 'rb') as model_file:
-        model = pickle.load(model_file)
-    return model
-
 
 # Initialization sequence execution
 try:
@@ -133,6 +138,53 @@ except Exception as e:
     st.stop()
 
 
+
+
+def build_fraud_input(step, tx_type, amount, old_bal_orig, new_bal_orig,
+                      old_bal_dest, new_bal_dest, dest_type_char, model_package):
+    scaler = model_package["scaler"]
+    scale_cols = model_package["scale_cols"]
+    le = model_package["label_encoder"]
+
+    df = pd.DataFrame([{
+        "step": step,
+        "type": tx_type,
+        "amount": amount,
+        "oldbalanceOrg": old_bal_orig,
+        "newbalanceOrig": new_bal_orig,
+        "oldbalanceDest": old_bal_dest,
+        "newbalanceDest": new_bal_dest,
+        "DestType": dest_type_char,
+    }])
+
+    df["BalanceDiff"] = df["oldbalanceOrg"] - df["newbalanceOrig"]
+    df["DestBalanceDiff"] = df["newbalanceDest"] - df["oldbalanceDest"]
+    df["IsBalanceError"] = np.where(df["amount"] != df["BalanceDiff"], 1, 0)
+    # 95th-percentile threshold is not stored in the package; use the PaySim dataset's
+    # typical value (~1 000 000) as a reasonable approximation.
+    df["LargeTransaction"] = (df["amount"] > 1_000_000).astype(int)
+    df["StepGroup"] = pd.cut(
+        df["step"], bins=[0, 200, 400, 600, 800],
+        labels=["Early", "Mid", "Late", "VeryLate"]
+    )
+    df["LogAmount"] = np.log1p(df["amount"])
+    df["LogOldBalanceOrg"] = np.log1p(df["oldbalanceOrg"])
+    df["LogNewBalanceOrig"] = np.log1p(df["newbalanceOrig"])
+    df["LogOldBalanceDest"] = np.log1p(df["oldbalanceDest"])
+    df["LogNewBalanceDest"] = np.log1p(df["newbalanceDest"])
+
+    df["DestType"] = le.transform(df["DestType"])
+
+    df = pd.get_dummies(df, columns=["type", "StepGroup"], drop_first=True)
+
+    for col in ["type_CASH_OUT", "type_DEBIT", "type_PAYMENT", "type_TRANSFER",
+                "StepGroup_Late", "StepGroup_Mid", "StepGroup_VeryLate"]:
+        if col not in df.columns:
+            df[col] = 0
+
+    df[scale_cols] = scaler.transform(df[scale_cols])
+
+    return df[model_package["features"]]
 
 
 def build_customer_input(credit_score, geography, gender, age, tenure, balance,
@@ -254,7 +306,7 @@ def show_AI_churn_analyst_page():
         "then Groq will explain the prediction and suggest retention actions."
     )
 
-    clf = load_assets()
+    clf = load_churn_model()
     feature_cols = [
         "CreditScore", "Gender", "Age", "Tenure", "Balance",
         "HasCrCard", "IsActiveMember", "EstimatedSalary", "Balance_to_Salary",
@@ -375,69 +427,62 @@ def show_AI_churn_analyst_page():
 
 
 def show_AI_fraud_analyst_page():
-    st.title("🤖 AI Churn Analyst")
+    st.title("🤖 AI Fraud Analyst")
     st.markdown(
-        "Enter a customer's profile. The churn model will score them, "
-        "then Groq will explain the prediction and suggest retention actions."
+        "Enter a transaction's details. The fraud model will score it, "
+        "then Groq will explain the prediction and suggest investigation actions."
     )
 
-    clf = load_assets()
-    feature_cols = [
-        "CreditScore", "Gender", "Age", "Tenure", "Balance",
-        "HasCrCard", "IsActiveMember", "EstimatedSalary", "Balance_to_Salary",
-        "Geography_Germany", "Geography_Spain",
-        "NumOfProducts_2", "NumOfProducts_3 or More",
-        "Age_Group_31-45", "Age_Group_46-65", "Age_Group_66-99",
-    ]
+    model_package = load_fraud_model()
+    clf = model_package["model"]
 
-    # ── Input form ────────────────────────────────────────────────────────────────
-    with st.form("customer_form"):
-        st.markdown('<div class="section-title">Customer Profile</div>', unsafe_allow_html=True)
+    with st.form("fraud_form"):
+        st.markdown('<div class="section-title">Transaction Profile</div>', unsafe_allow_html=True)
         c1, c2, c3 = st.columns(3)
 
         with c1:
-            credit_score = st.number_input("Credit Score", min_value=300, max_value=900, value=650)
-            age = st.number_input("Age", min_value=18, max_value=100, value=40)
-            tenure = st.slider("Tenure (years)", 0, 10, 5)
-            balance = st.number_input("Balance ($)", min_value=0.0, max_value=500_000.0, value=50_000.0, step=1000.0)
+            step = st.number_input("Step (1–744)", min_value=1, max_value=744, value=1)
+            amount = st.number_input("Amount ($)", min_value=0.0, max_value=10_000_000.0, value=10_000.0, step=500.0)
+            old_bal_orig = st.number_input("Origin Old Balance ($)", min_value=0.0, max_value=10_000_000.0,
+                                           value=50_000.0, step=1000.0)
+            new_bal_orig = st.number_input("Origin New Balance ($)", min_value=0.0, max_value=10_000_000.0,
+                                           value=40_000.0, step=1000.0)
 
         with c2:
-            geography = st.selectbox("Geography", ["France", "Germany", "Spain"])
-            gender = st.selectbox("Gender", ["Male", "Female"])
-            num_products = st.selectbox("NumOfProducts", [1, 2, 3, 4])
-            estimated_salary = st.number_input("Estimated Salary ($)", min_value=0.0, max_value=300_000.0,
-                                               value=60_000.0, step=1000.0)
+            tx_type = st.selectbox("Transaction Type", ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"])
+            dest_type = st.selectbox("Destination Account Type", ["C – Customer", "M – Merchant"])
+            old_bal_dest = st.number_input("Destination Old Balance ($)", min_value=0.0, max_value=10_000_000.0,
+                                           value=0.0, step=1000.0)
+            new_bal_dest = st.number_input("Destination New Balance ($)", min_value=0.0, max_value=10_000_000.0,
+                                           value=10_000.0, step=1000.0)
 
         with c3:
-            has_cr_card = st.checkbox("Has Credit Card", value=True)
-            is_active_member = st.checkbox("Is Active Member", value=True)
             groq_model = st.selectbox("Groq Model", ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"])
 
         submitted = st.form_submit_button("🔍 Predict & Analyse", use_container_width=True)
 
     if submitted:
-        input_df = build_customer_input(
-            credit_score, geography, gender, age, tenure, balance,
-            num_products, has_cr_card, is_active_member, estimated_salary
+        dest_type_char = dest_type[0]  # "C" or "M"
+        input_df = build_fraud_input(
+            step, tx_type, amount, old_bal_orig, new_bal_orig,
+            old_bal_dest, new_bal_dest, dest_type_char, model_package
         )
-        input_df = input_df[feature_cols]
 
-        churn_prob = clf.predict_proba(input_df)[0][1]
-        churn_label = "High Risk" if churn_prob >= 0.5 else "Low Risk"
+        fraud_prob = clf.predict_proba(input_df)[0][1]
+        fraud_label = "Fraudulent" if fraud_prob >= 0.5 else "Legitimate"
 
-        # ── Prediction metrics ────────────────────────────────────────────────────
         st.divider()
         st.markdown('<div class="section-title">Prediction Result</div>', unsafe_allow_html=True)
         r1, r2, r3 = st.columns(3)
-        r1.metric("Churn Probability", f"{churn_prob:.1%}")
-        r2.metric("Risk Level", churn_label)
-        r3.metric("Retention Probability", f"{1 - churn_prob:.1%}")
+        r1.metric("Fraud Probability", f"{fraud_prob:.1%}")
+        r2.metric("Verdict", fraud_label)
+        r3.metric("Legitimacy Probability", f"{1 - fraud_prob:.1%}")
 
-        # ── Top feature importances ───────────────────────────────────────────────
+        feature_cols = model_package["features"]
         importances = pd.Series(clf.feature_importances_, index=feature_cols)
         top5 = importances.nlargest(5)
         top5_str = "\n".join(
-            f"  - {feat} (importance {imp:.3f}, customer value: {input_df[feat].values[0]:.3f})"
+            f"  - {feat} (importance {imp:.3f}, value: {input_df[feat].values[0]:.4f})"
             for feat, imp in top5.items()
         )
 
@@ -448,49 +493,46 @@ def show_AI_fraud_analyst_page():
             orientation="h",
             title="Top 5 Model Features",
             color="Importance",
-            color_continuous_scale="Blues",
+            color_continuous_scale="Reds",
         )
         fig_imp.update_layout(coloraxis_showscale=False, yaxis={"categoryorder": "total ascending"})
         st.plotly_chart(fig_imp, use_container_width=True)
 
-        # ── Groq explanation ──────────────────────────────────────────────────────
         st.divider()
         st.markdown('<div class="section-title">AI Analysis</div>', unsafe_allow_html=True)
 
-        customer_profile = (
-            f"- Credit Score: {credit_score}\n"
-            f"- Geography: {geography}\n"
-            f"- Gender: {gender}\n"
-            f"- Age: {age}\n"
-            f"- Tenure: {tenure} years\n"
-            f"- Balance: ${balance:,.0f}\n"
-            f"- Number of Products: {num_products}\n"
-            f"- Has Credit Card: {'Yes' if has_cr_card else 'No'}\n"
-            f"- Is Active Member: {'Yes' if is_active_member else 'No'}\n"
-            f"- Estimated Salary: ${estimated_salary:,.0f}"
+        tx_profile = (
+            f"- Step: {step}\n"
+            f"- Transaction Type: {tx_type}\n"
+            f"- Amount: ${amount:,.2f}\n"
+            f"- Origin Old Balance: ${old_bal_orig:,.2f}\n"
+            f"- Origin New Balance: ${new_bal_orig:,.2f}\n"
+            f"- Destination Old Balance: ${old_bal_dest:,.2f}\n"
+            f"- Destination New Balance: ${new_bal_dest:,.2f}\n"
+            f"- Destination Account Type: {dest_type}"
         )
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a senior banking analytics expert. "
-                    "A Random Forest model has just predicted a customer's churn probability. "
+                    "You are a senior financial fraud investigation expert. "
+                    "A LightGBM model has just predicted the fraud probability of a transaction. "
                     "Explain the prediction in plain language and provide 3–5 specific, "
-                    "actionable retention strategies tailored to this customer's profile. "
+                    "actionable investigation or mitigation steps tailored to this transaction's profile. "
                     "Be concise and professional. Use bullet points where appropriate."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Customer profile:\n{customer_profile}\n\n"
-                    f"Model prediction: {churn_prob:.1%} churn probability ({churn_label})\n\n"
-                    f"Top 5 most important features (globally) with this customer's values:\n{top5_str}\n\n"
+                    f"Transaction profile:\n{tx_profile}\n\n"
+                    f"Model prediction: {fraud_prob:.1%} fraud probability ({fraud_label})\n\n"
+                    f"Top 5 most important features with this transaction's values:\n{top5_str}\n\n"
                     "Please:\n"
-                    "1. In 2–3 sentences, explain why this customer may or may not be at risk, "
-                    "referencing their specific profile.\n"
-                    "2. List 3–5 concrete retention actions the bank should take for this customer."
+                    "1. In 2–3 sentences, explain why this transaction may or may not be fraudulent, "
+                    "referencing its specific profile.\n"
+                    "2. List 3–5 concrete actions the fraud team should take for this transaction."
                 ),
             },
         ]
