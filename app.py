@@ -6,10 +6,28 @@ import pickle
 import plotly.express as px
 from groq import Groq
 import duckdb
+import requests
 
 
 api_key = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=api_key)
+
+N8N_WEBHOOK_URL = st.secrets["N8N_WEBHOOK_URL"]
+
+
+def send_to_n8n(header: str, body: str):
+    payload = {
+        "header": header,
+        "body": body,
+        "email": "burak.tunali41@gmail.com",
+    }
+    try:
+        resp = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=10)
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        st.warning(f"n8n webhook delivery failed: {e}")
+        return False
 
 
 # Set page configuration
@@ -423,7 +441,12 @@ def show_AI_churn_analyst_page():
         with st.spinner("Asking Groq…"):
             completion = client.chat.completions.create(model=groq_model, messages=messages)
 
-        st.markdown(completion.choices[0].message.content)
+        ai_response = completion.choices[0].message.content
+        st.markdown(ai_response)
+
+        n8n_header = f"Churn Analysis Result – {churn_label} ({churn_prob:.1%})"
+        if send_to_n8n(n8n_header, ai_response):
+            st.success("Results sent to n8n.")
 
 
 def show_AI_fraud_analyst_page():
@@ -540,7 +563,12 @@ def show_AI_fraud_analyst_page():
         with st.spinner("Asking Groq…"):
             completion = client.chat.completions.create(model=groq_model, messages=messages)
 
-        st.markdown(completion.choices[0].message.content)
+        ai_response = completion.choices[0].message.content
+        st.markdown(ai_response)
+
+        n8n_header = f"Fraud Analysis Result – {fraud_label} ({fraud_prob:.1%})"
+        if send_to_n8n(n8n_header, ai_response):
+            st.success("Results sent to n8n.")
 
 
 # -----------------------------------------------------------------------------
