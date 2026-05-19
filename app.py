@@ -596,7 +596,7 @@ page_selection = st.sidebar.radio(
 )
 
 st.sidebar.divider()
-st.sidebar.caption("⚡ *Data-Fu Project Team 3.*")
+st.sidebar.caption("⚡ *DataFu - Group 03 *")
 st.sidebar.caption(" 1. Yagmur Sargin")
 st.sidebar.caption(" 2. Hakan Kurucay ")
 st.sidebar.caption(" 3. Fikri Uğur Emek ")
