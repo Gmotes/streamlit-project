@@ -596,7 +596,11 @@ page_selection = st.sidebar.radio(
 )
 
 st.sidebar.divider()
-st.sidebar.caption("⚡ *Data status: Fully cached into application memory via Streamlit decorators.*")
+st.sidebar.caption("⚡ *Data-Fu Project Team 3.*")
+st.sidebar.text(" 1. Yagmur Sargin")
+st.sidebar.text(" 2. Hakan Kurucay ")
+st.sidebar.text(" 3. Fikri Uğur Emek ")
+st.sidebar.text(" 4. Burak Tunali")
 
 # Route execution calls to target functions
 if page_selection == "1. Executive KPI Overview":
