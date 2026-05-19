@@ -597,10 +597,10 @@ page_selection = st.sidebar.radio(
 
 st.sidebar.divider()
 st.sidebar.caption("⚡ *Data-Fu Project Team 3.*")
-st.sidebar.text(" 1. Yagmur Sargin")
-st.sidebar.text(" 2. Hakan Kurucay ")
-st.sidebar.text(" 3. Fikri Uğur Emek ")
-st.sidebar.text(" 4. Burak Tunali")
+st.sidebar.caption(" 1. Yagmur Sargin")
+st.sidebar.caption(" 2. Hakan Kurucay ")
+st.sidebar.caption(" 3. Fikri Uğur Emek ")
+st.sidebar.caption(" 4. Burak Tunali")
 
 # Route execution calls to target functions
 if page_selection == "1. Executive KPI Overview":
