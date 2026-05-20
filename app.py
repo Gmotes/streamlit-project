@@ -51,17 +51,7 @@ def load_churn_data():
 @st.cache_data(ttl=3600)
 def load_paysim_data():
     """Loads and caches the PaySim fraud detection dataset from a public URL."""
-    url =  st.secrets["PARQUET_URL"]
-
-    df = duckdb.query(
-        f"""
-            SELECT type, isFraud, amount
-            FROM read_parquet('{url}')
-            LIMIT 1000000
-        """
-    ).df()
-
-    return df
+    return pd.read_csv("data/Paysim.csv")
 
 @st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
 def load_churn_model():
