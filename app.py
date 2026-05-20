@@ -47,12 +47,6 @@ def load_churn_data():
     """Loads and caches the customer churn dataset."""
     return pd.read_csv("data/Churn_Modelling.csv")
 
-
-@st.cache_data(ttl=3600)
-def load_paysim_data():
-    """Loads and caches the PaySim fraud detection dataset from a public URL."""
-    return pd.read_csv("data/Paysim.csv")
-
 @st.cache_resource  # Keeps the model in memory so it doesn't reload on every click
 def load_churn_model():
     with open('xgb_churn_model.pkl', 'rb') as model_file:
